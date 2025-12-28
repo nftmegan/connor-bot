@@ -1,82 +1,74 @@
-version: '3.8'
+name: connor-bot
 
 services:
   redis:
     image: redis:7.2-alpine
-    platform: linux/arm64
+    container_name: bot_redis
+    restart: always
     command: redis-server --save "" --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
 
   backend:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile.arm64
-    platform: linux/arm64
-    ports:
-      - "3001:3001"
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: bot_backend
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: ./backend/.env
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
       - DATABASE_URL=file:/app/data/bot.db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=production
     volumes:
-      - ./data:/app/data
-      - ./backend/sessions:/app/sessions
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - sqlite_data:/app/data
 
   scraper:
     build:
-      context: ./scraper
-      dockerfile: Dockerfile.arm64
-    platform: linux/arm64
+      context: .
+      dockerfile: ./scraper/Dockerfile
+    container_name: bot_scraper
+    restart: always
+    ipc: host
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       - DATABASE_URL=file:/app/data/bot.db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - HEADLESS=true
+      # UNCOMMENT AND FILL THIS TO USE PROXY
+      # - PROXY_URL=http://username:password@proxy.example.com:8080
     volumes:
-      - ./data:/app/data
       - ./scraper/sessions:/app/sessions
-    depends_on:
-      - redis
-      - backend
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
+      - sqlite_data:/app/data
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.arm64
-    platform: linux/arm64
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    container_name: bot_frontend
+    restart: always
     ports:
       - "3000:3000"
     environment:
       - DATABASE_URL=file:/app/data/bot.db
-      - NEXT_PUBLIC_API_URL=http://backend:3001
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
     volumes:
-      - ./data:/app/data
-    depends_on:
-      - backend
-    restart: unless-stopped
+      - sqlite_data:/app/data
 
 volumes:
-  connor-data:
+  redis_data:
+  sqlite_data:
