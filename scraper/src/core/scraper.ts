@@ -48,7 +48,7 @@ export class ScraperService {
 
         const getText = (s: string) => article.querySelector(s)?.textContent || '';
         const getMetric = (label: string) => {
-           // X still uses 'retweet' in aria-labels occasionally, but we map to reposts internally
+           // X uses various labels, we map to reposts internally
            const el = article.querySelector(`[aria-label*="${label}"]`);
            return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
         };
@@ -62,7 +62,7 @@ export class ScraperService {
           id,
           content: getText('[data-testid="tweetText"]'),
           likes: getMetric('likes'),
-          reposts: getMetric('reposts'), // Fetched as reposts/retweets
+          reposts: getMetric('reposts'), // Fetched as reposts
           replies: getMetric('replies'),
           views: getText('a[href*="/analytics"]')
         };
@@ -90,12 +90,12 @@ export class ScraperService {
       likes: parse(raw.likes),
       reposts: parse(raw.reposts),
       replies: parse(raw.replies),
-      updatedAt: new Date().toISOString() // Drizzle SQLite text date
+      lastScraped: new Date().toISOString() // Fixed: matched to schema
     };
 
     // Upsert Post
     await db.insert(posts).values(clean)
-      .onConflictDoUpdate({ target: posts.id, set: { ...clean, lastScraped: new Date().toISOString() } });
+      .onConflictDoUpdate({ target: posts.id, set: clean });
 
     // Snapshot
     await db.insert(snapshots).values({

@@ -3,8 +3,8 @@ import 'dotenv/config';
 
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1, "Bot Token is required"),
-  // Default to Docker path, fallback to local relative
-  DATABASE_URL: z.string().default("file:/app/data/bot.db"),
+  // Default to local relative path for dev; Docker overrides this via ENV
+  DATABASE_URL: z.string().default("file:bot.db"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 
