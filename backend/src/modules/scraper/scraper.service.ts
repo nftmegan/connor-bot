@@ -18,7 +18,7 @@ export class ScraperService {
 
     try {
       await page.goto(`https://x.com/${this.targetAccount}`, { waitUntil: 'domcontentloaded' });
-      
+
       // Basic login check
       if (page.url().includes('login')) {
         logger.warn('🔒 Login Wall detected. Manual intervention required?');
@@ -30,7 +30,8 @@ export class ScraperService {
 
       // Scroll and Scrape
       for (let i = 0; i < 3; i++) {
-        await page.keyboard.press('j'); // Next post
+        await page.keyboard.press('j');
+        // Next post
         await page.waitForTimeout(2000);
         await this.processActivePost(page);
       }
@@ -85,7 +86,7 @@ export class ScraperService {
 
     const clean = {
       id: raw.id,
-      content: raw.text,
+      content: raw.content,
       author: this.targetAccount,
       views: parse(raw.views),
       likes: parse(raw.likes),

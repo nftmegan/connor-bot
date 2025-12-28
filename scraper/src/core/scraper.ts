@@ -26,9 +26,10 @@ export class ScraperService {
 
       // Scroll & Scrape
       for (let i = 0; i < 3; i++) {
-        await page.keyboard.press('j'); // Next tweet shortcut
+        await page.keyboard.press('j');
+        // Next post shortcut
         await page.waitForTimeout(2000);
-        await this.processVisibleTweet(page);
+        await this.processVisiblePost(page);
       }
 
     } catch (e: any) {
@@ -38,14 +39,16 @@ export class ScraperService {
     }
   }
 
-  private async processVisibleTweet(page: Page) {
+  private async processVisiblePost(page: Page) {
     try {
       const data = await page.evaluate(() => {
+        // Selectors must remain as per X DOM, but we process them as posts
         const article = document.querySelector('article[data-testid="tweet"]');
         if (!article) return null;
 
         const getText = (s: string) => article.querySelector(s)?.textContent || '';
         const getMetric = (label: string) => {
+           // X still uses 'retweet' in aria-labels occasionally, but we map to reposts internally
            const el = article.querySelector(`[aria-label*="${label}"]`);
            return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
         };
@@ -59,7 +62,7 @@ export class ScraperService {
           id,
           content: getText('[data-testid="tweetText"]'),
           likes: getMetric('likes'),
-          reposts: getMetric('reposts'),
+          reposts: getMetric('reposts'), // Fetched as reposts/retweets
           replies: getMetric('replies'),
           views: getText('a[href*="/analytics"]')
         };
