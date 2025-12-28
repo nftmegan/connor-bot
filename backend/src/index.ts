@@ -1,3 +1,4 @@
+import { healthRouter } from './health.js';
 import { bot } from './bot/bot.js';
 import { config } from './core/config.js';
 import { logger } from './core/logger.js';
@@ -53,6 +54,7 @@ class Application {
 }
 
 const app = new Application();
+app.use('/health', healthRouter);
 app.start().catch(err => {
   logger.fatal({ err }, 'Startup Failed');
   process.exit(1);

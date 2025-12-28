@@ -1,68 +1,82 @@
 version: '3.8'
 
 services:
-  # 1. Redis (Job Queue)
   redis:
-    image: redis:alpine
-    container_name: bot_redis
-    restart: always
+    image: redis:7.2-alpine
+    platform: linux/arm64
+    command: redis-server --save "" --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # 2. Backend (Telegram Bot)
   backend:
-    build: ./backend
-    container_name: bot_backend
-    restart: always
-    depends_on:
-      redis:
-        condition: service_healthy
-    env_file: ./backend/.env
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile.arm64
+    platform: linux/arm64
+    ports:
+      - "3001:3001"
     environment:
+      - BOT_TOKEN=${BOT_TOKEN}
       - DATABASE_URL=file:/app/data/bot.db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=production
     volumes:
-      - sqlite_data:/app/data
-
-  # 3. Scraper (Node.js Worker)
-  scraper:
-    build: ./scraper
-    container_name: bot_scraper
-    restart: always
+      - ./data:/app/data
+      - ./backend/sessions:/app/sessions
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  scraper:
+    build:
+      context: ./scraper
+      dockerfile: Dockerfile.arm64
+    platform: linux/arm64
     environment:
       - DATABASE_URL=file:/app/data/bot.db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - HEADLESS=true
     volumes:
+      - ./data:/app/data
       - ./scraper/sessions:/app/sessions
-      - sqlite_data:/app/data
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
-  # 4. Frontend (Dashboard)
   frontend:
-    build: ./frontend
-    container_name: bot_frontend
-    restart: always
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.arm64
+    platform: linux/arm64
     ports:
       - "3000:3000"
     environment:
       - DATABASE_URL=file:/app/data/bot.db
-      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - NEXT_PUBLIC_API_URL=http://backend:3001
     volumes:
-      - sqlite_data:/app/data
+      - ./data:/app/data
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
-  redis_data:
-  sqlite_data:
+  connor-data:

@@ -1,10 +1,19 @@
 {
   "name": "connor-bot-monorepo",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
     "build": "pnpm -r build",
-    "db:push": "pnpm --filter backend db:push"
+    "db:push": "pnpm --filter backend db:push",
+    "db:migrate": "pnpm --filter backend db:migrate",
+    "playwright:install": "pnpm --filter scraper playwright:install",
+    "docker:build": "pnpm -r docker:build",
+    "docker:up": "docker-compose up --build",
+    "docker:down": "docker-compose down",
+    "clean": "rm -rf node_modules */node_modules */dist */build",
+    "reinstall": "pnpm clean && pnpm install",
+    "full-upgrade": "./upgrade-system.sh"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
