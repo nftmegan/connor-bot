@@ -22,18 +22,23 @@ export class BrowserEngine {
       }
 
       const userAgent = new UserAgent({ deviceCategory: 'desktop' }).toString();
-      const proxyUrl = process.env.PROXY_URL; // Expected format: http://user:pass@host:port
+      const proxyUrl = process.env.PROXY_URL; 
 
+      // Log Proxy Usage
       console.log(`🚀 Launching Stealth Browser (${this.accountId})...`);
-      if (proxyUrl) console.log(`🌐 Using Proxy: ${proxyUrl.replace(/:[^:]*@/, ':****@')}`);
+      if (proxyUrl) {
+         console.log(`🌐 Using Proxy: ${proxyUrl.replace(/:[^:]*@/, ':****@')}`);
+      } else {
+         // This should theoretically be caught by index.ts, but as a safety:
+         throw new Error("Proxy URL is missing in BrowserEngine!");
+      }
 
       this.context = await chromium.launchPersistentContext(this.userDataDir, {
-        channel: 'chrome', 
+        // FIX: Removed "channel: 'chrome'" to use the default bundled Chromium in Docker
         headless: process.env.HEADLESS !== 'false',
         viewport: { width: 1920, height: 1080 },
         userAgent: userAgent,
-        // PROXY CONFIGURATION ADDED HERE
-        proxy: proxyUrl ? { server: proxyUrl } : undefined,
+        proxy: { server: proxyUrl },
         args: [
           '--disable-blink-features=AutomationControlled',
           '--no-sandbox',

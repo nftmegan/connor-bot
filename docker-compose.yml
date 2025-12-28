@@ -16,24 +16,6 @@ services:
     volumes:
       - redis_data:/data
 
-  backend:
-    build:
-      context: .
-      dockerfile: ./backend/Dockerfile
-    container_name: bot_backend
-    restart: always
-    depends_on:
-      redis:
-        condition: service_healthy
-    env_file: ./backend/.env
-    environment:
-      - DATABASE_URL=file:/app/data/bot.db
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - NODE_ENV=production
-    volumes:
-      - sqlite_data:/app/data
-
   scraper:
     build:
       context: .
@@ -49,25 +31,11 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - HEADLESS=true
-      # UNCOMMENT AND FILL THIS TO USE PROXY
-      # - PROXY_URL=http://username:password@proxy.example.com:8080
+      # - PROXY_URL=http://user:pass@host:port 
     volumes:
       - ./scraper/sessions:/app/sessions
       - sqlite_data:/app/data
-
-  frontend:
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-    container_name: bot_frontend
-    restart: always
-    ports:
-      - "3000:3000"
-    environment:
-      - DATABASE_URL=file:/app/data/bot.db
-      - NEXT_PUBLIC_API_URL=http://localhost:3001
-    volumes:
-      - sqlite_data:/app/data
+      - ./scraper:/app/scraper:rw  # Hot Reloading
 
 volumes:
   redis_data:
