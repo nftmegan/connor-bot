@@ -14,6 +14,7 @@
     "bullmq": "^5.66.4",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
+    "express": "^5.2.1",
     "grammy": "^1.38.4",
     "ioredis": "^5.8.2",
     "pino": "^10.1.0",
@@ -22,6 +23,7 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^25.0.3",
     "drizzle-kit": "^0.31.8",
     "tsx": "^4.21.0",

@@ -24,32 +24,25 @@ export class BrowserEngine {
       const userAgent = new UserAgent({ deviceCategory: 'desktop' }).toString();
       const proxyUrl = process.env.PROXY_URL; 
 
-      // Log Proxy Usage
       console.log(`🚀 Launching Stealth Browser (${this.accountId})...`);
       if (proxyUrl) {
          console.log(`🌐 Using Proxy: ${proxyUrl.replace(/:[^:]*@/, ':****@')}`);
-      } else {
-         // This should theoretically be caught by index.ts, but as a safety:
-         throw new Error("Proxy URL is missing in BrowserEngine!");
       }
 
       this.context = await chromium.launchPersistentContext(this.userDataDir, {
-        // FIX: Removed "channel: 'chrome'" to use the default bundled Chromium in Docker
+        // Fix: Removed "channel: 'chrome'" to use the bundled Docker Chromium
         headless: process.env.HEADLESS !== 'false',
         viewport: { width: 1920, height: 1080 },
         userAgent: userAgent,
-        proxy: { server: proxyUrl },
+        proxy: proxyUrl ? { server: proxyUrl } : undefined,
         args: [
           '--disable-blink-features=AutomationControlled',
           '--no-sandbox',
           '--disable-setuid-sandbox',
-          '--disable-infobars',
-          '--disable-dev-shm-usage',
+          '--disable-dev-shm-usage', // Vital for Docker
           '--disable-accelerated-2d-canvas',
           '--disable-gpu',
           '--window-size=1920,1080',
-          '--disable-web-security',
-          '--disable-features=IsolateOrigins,site-per-process',
         ],
         ignoreDefaultArgs: ['--enable-automation'],
         acceptDownloads: false,
@@ -58,7 +51,6 @@ export class BrowserEngine {
 
       const page = this.context.pages()[0] || await this.context.newPage();
 
-      // Fix: Apply extra headers to look more like a real user
       await page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',

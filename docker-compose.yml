@@ -31,11 +31,13 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - HEADLESS=true
-      # - PROXY_URL=http://user:pass@host:port 
+      # - PROXY_URL=http://user:pass@host:port
     volumes:
       - ./scraper/sessions:/app/sessions
       - sqlite_data:/app/data
       - ./scraper:/app/scraper:rw  # Hot Reloading
+      - ./scraper/package.json:/app/scraper/package.json
+      - ./pnpm-lock.yaml:/app/pnpm-lock.yaml
 
 volumes:
   redis_data:

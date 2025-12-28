@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "dev": "concurrently -n \"DOCKER,BACKEND,FRONTEND\" -c \"blue,green,magenta\" \"docker compose up\" \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
     "build": "pnpm -r build",
     "db:push": "pnpm --filter backend db:push",
     "db:migrate": "pnpm --filter backend db:migrate",

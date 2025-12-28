@@ -1,3 +1,912 @@
+============================================
+DIRECTORY STRUCTURE
+============================================
+.
+./project_context.txt
+./backend
+./backend/node_modules
+./backend/node_modules/ioredis
+./backend/node_modules/typescript
+./backend/node_modules/express
+./backend/node_modules/playwright
+./backend/node_modules/pino
+./backend/node_modules/@types
+./backend/node_modules/@libsql
+./backend/node_modules/grammy
+./backend/node_modules/drizzle-kit
+./backend/node_modules/zod
+./backend/node_modules/tsx
+./backend/node_modules/pino-pretty
+./backend/node_modules/drizzle-orm
+./backend/node_modules/bullmq
+./backend/node_modules/@grammyjs
+./backend/node_modules/dotenv
+./backend/sessions
+./backend/drizzle.config.ts
+./backend/bot.db
+./backend/tsconfig.json
+./backend/src
+./backend/src/modules
+./backend/src/health.ts
+./backend/src/index.ts
+./backend/src/db
+./backend/src/bot
+./backend/src/core
+./backend/package.json
+./dump_project.sh
+./pnpm-workspace.yaml
+./pnpm-lock.yaml
+./docker-compose.yml
+./scraper
+./scraper/node_modules
+./scraper/node_modules/ioredis
+./scraper/node_modules/puppeteer-extra-plugin-stealth
+./scraper/node_modules/typescript
+./scraper/node_modules/user-agents
+./scraper/node_modules/playwright
+./scraper/node_modules/pino
+./scraper/node_modules/@types
+./scraper/node_modules/@libsql
+./scraper/node_modules/tsx
+./scraper/node_modules/pino-pretty
+./scraper/node_modules/playwright-extra
+./scraper/node_modules/drizzle-orm
+./scraper/node_modules/bullmq
+./scraper/node_modules/dotenv
+./scraper/sessions
+./scraper/tsconfig.json
+./scraper/src
+./scraper/src/index.ts
+./scraper/src/queue
+./scraper/src/utils
+./scraper/src/db.ts
+./scraper/src/schema.ts
+./scraper/src/core
+./scraper/package-lock.json
+./scraper/Dockerfile
+./scraper/package.json
+./data
+./data/bot.db
+./frontend
+./frontend/node_modules
+./frontend/node_modules/typescript
+./frontend/node_modules/clsx
+./frontend/node_modules/tailwind-merge
+./frontend/node_modules/@types
+./frontend/node_modules/@libsql
+./frontend/node_modules/drizzle-kit
+./frontend/node_modules/@tailwindcss
+./frontend/node_modules/react-dom
+./frontend/node_modules/recharts
+./frontend/node_modules/drizzle-orm
+./frontend/node_modules/react
+./frontend/node_modules/eslint-config-next
+./frontend/node_modules/@radix-ui
+./frontend/node_modules/tailwindcss
+./frontend/node_modules/next
+./frontend/node_modules/autoprefixer
+./frontend/node_modules/eslint
+./frontend/node_modules/postcss
+./frontend/node_modules/dotenv
+./frontend/pnpm-workspace.yaml
+./frontend/next-env.d.ts
+./frontend/next.config.ts
+./frontend/postcss.config.mjs
+./frontend/eslint.config.mjs
+./frontend/public
+./frontend/public/window.svg
+./frontend/public/vercel.svg
+./frontend/public/next.svg
+./frontend/public/globe.svg
+./frontend/public/file.svg
+./frontend/tsconfig.json
+./frontend/src
+./frontend/src/app
+./frontend/src/lib
+./frontend/README.md
+./frontend/package.json
+./package.json
+
+============================================
+FILE CONTENTS
+============================================
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/drizzle.config.ts
+--------------------------------------------------------------------------------
+import { defineConfig } from 'drizzle-kit';
+import 'dotenv/config';
+
+export default defineConfig({
+  schema: './src/core/db/schema.ts',
+  out: './drizzle',
+  dialect: 'sqlite',
+  dbCredentials: {
+    url: process.env.DATABASE_URL || 'file:bot.db',
+  },
+  verbose: true,
+  strict: true,
+});
+
+END FILE: ./backend/drizzle.config.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/bot.db
+--------------------------------------------------------------------------------
+
+END FILE: ./backend/bot.db
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/tsconfig.json
+--------------------------------------------------------------------------------
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+
+END FILE: ./backend/tsconfig.json
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/modules/users/users.service.ts
+--------------------------------------------------------------------------------
+import { eq, sql } from 'drizzle-orm';
+import { db } from '../../core/db/index.js';
+import { users } from '../../core/db/schema.js';
+import { logger } from '../../core/logger.js';
+
+export const UsersService = {
+  register: async (telegramId: number, username?: string) => {
+    try {
+      await db.insert(users).values({
+        telegramId,
+        username,
+      }).onConflictDoUpdate({
+        target: users.telegramId,
+        set: { username, isActive: true }
+      });
+      logger.info({ telegramId }, 'User registered/updated');
+    } catch (error) {
+      logger.error({ error, telegramId }, 'Failed to register user');
+    }
+  },
+
+  getActiveIds: async () => {
+    const results = await db.query.users.findMany({
+      where: eq(users.isActive, true),
+      columns: { telegramId: true }
+    });
+    return results.map(u => u.telegramId);
+  },
+
+  getCount: async () => {
+    const [result] = await db.select({ count: sql`count(*)` }).from(users);
+    return Number(result.count);
+  }
+};
+
+END FILE: ./backend/src/modules/users/users.service.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/modules/scraper/scraper.service.ts
+--------------------------------------------------------------------------------
+import { Page } from 'playwright';
+import { BrowserEngine } from './browser.engine.js';
+import { logger } from '../../core/logger.js';
+import { db } from '../../core/db/index.js';
+import { posts, snapshots } from '../../core/db/schema.js';
+import { eq } from 'drizzle-orm';
+
+export class ScraperService {
+  private engine: BrowserEngine;
+
+  constructor(private targetAccount: string) {
+    this.engine = new BrowserEngine({ accountId: 'main_scraper' });
+  }
+
+  async scrape() {
+    logger.info(`ğŸ•µï¸ Starting surveillance on @${this.targetAccount}`);
+    const page = await this.engine.launch();
+
+    try {
+      await page.goto(`https://x.com/${this.targetAccount}`, { waitUntil: 'domcontentloaded' });
+
+      // Basic login check
+      if (page.url().includes('login')) {
+        logger.warn('ğŸ”’ Login Wall detected. Manual intervention required?');
+        // Simple logic: if headless, we might fail here. 
+        // For production, you'd manage cookies better.
+      }
+
+      await page.waitForTimeout(3000);
+
+      // Scroll and Scrape
+      for (let i = 0; i < 3; i++) {
+        await page.keyboard.press('j');
+        // Next post
+        await page.waitForTimeout(2000);
+        await this.processActivePost(page);
+      }
+
+    } catch (error: any) {
+      logger.error({ err: error.message }, 'Scrape cycle failed');
+    } finally {
+      await this.engine.close();
+    }
+  }
+
+  private async processActivePost(page: Page) {
+    try {
+      const data = await page.evaluate(() => {
+        const article = document.querySelector('article[data-testid="tweet"]');
+        if (!article) return null;
+
+        const getText = (sel: string) => article.querySelector(sel)?.textContent || '';
+        const getMetric = (label: string) => {
+           const el = article.querySelector(`[aria-label*="${label}"]`);
+           return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
+        };
+
+        const link = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
+        const id = link?.split('/status/')[1];
+
+        if (!id) return null;
+
+        return {
+          id,
+          content: getText('[data-testid="tweetText"]'),
+          replies: getMetric('replies'),
+          reposts: getMetric('reposts'),
+          likes: getMetric('likes'),
+          views: getText('a[href*="/analytics"]'), 
+        };
+      });
+
+      if (data) await this.saveData(data);
+
+    } catch (e) { /* ignore DOM errors */ }
+  }
+
+  private async saveData(raw: any) {
+    const parse = (str: string) => {
+      if (!str) return 0;
+      let n = parseFloat(str.replace(/,/g, ''));
+      if (str.toUpperCase().includes('K')) n *= 1000;
+      if (str.toUpperCase().includes('M')) n *= 1000000;
+      return Math.floor(n);
+    };
+
+    const clean = {
+      id: raw.id,
+      content: raw.content,
+      author: this.targetAccount,
+      views: parse(raw.views),
+      likes: parse(raw.likes),
+      reposts: parse(raw.reposts),
+      replies: parse(raw.replies),
+      updatedAt: new Date().toISOString()
+    };
+
+    // Upsert Post
+    await db.insert(posts).values(clean)
+      .onConflictDoUpdate({ 
+        target: posts.id, 
+        set: { ...clean, lastScraped: new Date().toISOString() } 
+      });
+
+    // Add Snapshot
+    await db.insert(snapshots).values({
+      postId: clean.id,
+      ...clean
+    });
+
+    logger.info({ id: clean.id, likes: clean.likes }, 'ğŸ’¾ Post Saved');
+  }
+}
+END FILE: ./backend/src/modules/scraper/scraper.service.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/modules/scraper/browser.engine.ts
+--------------------------------------------------------------------------------
+import { chromium, BrowserContext, Page } from 'playwright';
+import path from 'path';
+import fs from 'fs';
+import { logger } from '../../core/logger.js';
+
+interface BrowserConfig {
+  accountId: string;
+  headless?: boolean;
+}
+
+export class BrowserEngine {
+  private context: BrowserContext | null = null;
+  private page: Page | null = null;
+  private userDataDir: string;
+
+  constructor(private config: BrowserConfig) {
+    this.userDataDir = path.resolve(process.cwd(), 'sessions', config.accountId);
+  }
+
+  async launch(): Promise<Page> {
+    if (!fs.existsSync(this.userDataDir)) {
+      fs.mkdirSync(this.userDataDir, { recursive: true });
+    }
+
+    logger.info({ account: this.config.accountId }, 'ğŸš€ Launching Browser Engine');
+
+    this.context = await chromium.launchPersistentContext(this.userDataDir, {
+      headless: this.config.headless ?? true,
+      viewport: null,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--start-maximized',
+        '--no-sandbox',
+        '--disable-infobars',
+        '--disable-setuid-sandbox'
+      ],
+    });
+
+    this.page = this.context.pages()[0] || await this.context.newPage();
+
+    // Stealth Patch
+    await this.page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
+    return this.page;
+  }
+
+  async close() {
+    if (this.context) await this.context.close();
+  }
+}
+
+END FILE: ./backend/src/modules/scraper/browser.engine.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/modules/scraper/queue.service.ts
+--------------------------------------------------------------------------------
+import { Queue } from 'bullmq';
+import { logger } from '../../core/logger.js';
+
+const REDIS_CONFIG = {
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || '6379')
+};
+
+// Unified Queue Name
+export const scraperQueue = new Queue('scraper_queue', { connection: REDIS_CONFIG });
+
+export const QueueService = {
+  /**
+   * Adds a recurring scraping job for a target user.
+   * Uses a custom job ID to easily identify duplicates.
+   */
+  addScrapeJob: async (target: string) => {
+    const jobId = `scrape:${target}`;
+    
+    await scraperQueue.add('scrape', { target }, {
+      jobId, 
+      repeat: { every: 10 * 60 * 1000 } // Every 10 mins
+    });
+    
+    logger.info({ target }, 'â° Post Tracking Scheduled');
+  },
+
+  /**
+   * Stops the scraping job for a specific target.
+   */
+  stopScrapeJob: async (target: string) => {
+    const repeatableJobs = await scraperQueue.getRepeatableJobs();
+    
+    // Find and remove jobs for this target
+    for (const job of repeatableJobs) {
+      // Check if this job matches our target
+      if (job.name === 'scrape' && job.id?.includes(target)) {
+        await scraperQueue.removeRepeatableByKey(job.key);
+        logger.info({ target, jobKey: job.key }, 'ğŸ—‘ï¸ Removed repeatable job');
+      }
+    }
+
+    // Also remove any pending jobs for this target
+    const jobs = await scraperQueue.getJobs(['waiting', 'delayed', 'active']);
+    for (const job of jobs) {
+      if (job.name === 'scrape' && job.data.target === target) {
+        await job.remove();
+      }
+    }
+
+    logger.info({ target }, 'ğŸ›‘ Tracking Stopped');
+  },
+  
+  clearJobs: async () => {
+    await scraperQueue.drain();
+    const repeatable = await scraperQueue.getRepeatableJobs();
+    for (const job of repeatable) await scraperQueue.removeRepeatableByKey(job.key);
+    logger.info('ğŸ›‘ All Jobs Cleared');
+  }
+};
+
+END FILE: ./backend/src/modules/scraper/queue.service.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/modules/crypto/price.service.ts
+--------------------------------------------------------------------------------
+import { z } from 'zod';
+import { logger } from '../../core/logger.js';
+
+const BinanceTickerSchema = z.object({
+  symbol: z.string(),
+  price: z.string().transform((val) => parseFloat(val).toFixed(2)),
+});
+
+export const PriceService = {
+  fetchSolanaPrice: async (): Promise<string | null> => {
+    try {
+      const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT');
+      
+      if (!response.ok) throw new Error(`API Status: ${response.status}`);
+
+      const json = await response.json();
+      const data = BinanceTickerSchema.parse(json);
+      
+      return data.price;
+    } catch (error) {
+      logger.error({ error }, 'Failed to fetch price');
+      return null;
+    }
+  }
+};
+
+END FILE: ./backend/src/modules/crypto/price.service.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/health.ts
+--------------------------------------------------------------------------------
+import { Router } from 'express';
+import { db } from './core/db/index.js';
+import { logger } from './core/logger.js';
+
+const router = Router();
+
+router.get('/health', async (req, res) => {
+  const healthcheck = {
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+    checks: {
+      database: 'pending',
+      redis: 'pending',
+      memory: 'pending',
+    },
+  };
+
+  try {
+    // Check database
+    await db.execute('SELECT 1');
+    healthcheck.checks.database = 'healthy';
+  } catch (error) {
+    healthcheck.checks.database = 'unhealthy';
+    logger.error({ error }, 'Database health check failed');
+  }
+
+  // Check memory
+  const used = process.memoryUsage();
+  healthcheck.checks.memory = {
+    rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
+    heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
+    heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
+    external: `${Math.round(used.external / 1024 / 1024)}MB`,
+  };
+
+  const allHealthy = Object.values(healthcheck.checks).every(
+    check => check === 'healthy' || typeof check === 'object'
+  );
+
+  res.status(allHealthy ? 200 : 503).json(healthcheck);
+});
+
+router.get('/metrics', (req, res) => {
+  const metrics = {
+    nodejs: {
+      version: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      memory: process.memoryUsage(),
+      uptime: process.uptime(),
+    },
+    system: {
+      cpus: require('os').cpus().length,
+      freemem: require('os').freemem(),
+      totalmem: require('os').totalmem(),
+      loadavg: require('os').loadavg(),
+    },
+  };
+
+  res.json(metrics);
+});
+
+export { router as healthRouter };
+
+END FILE: ./backend/src/health.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/index.ts
+--------------------------------------------------------------------------------
+import { healthRouter } from './health.js';
+import { bot } from './bot/bot.js';
+import { config } from './core/config.js';
+import { logger } from './core/logger.js';
+import { PriceService } from './modules/crypto/price.service.js';
+import { UsersService } from './modules/users/users.service.js';
+
+class Application {
+  private intervalId: NodeJS.Timeout | null = null;
+
+  async start() {
+    logger.info('ğŸ¤– Starting Connor Bot System...');
+
+    const count = await UsersService.getCount();
+    logger.info({ userCount: count }, 'ğŸ“¦ Database initialized');
+
+    this.startJobs();
+
+    await bot.start({
+      onStart: () => logger.info('âœ… Telegram Bot Connected'),
+    });
+  }
+
+  private startJobs() {
+    logger.info('â° Job Scheduler: Started');
+    this.broadcastJob();
+    this.intervalId = setInterval(() => this.broadcastJob(), 60 * 1000);
+  }
+
+  private async broadcastJob() {
+    const price = await PriceService.fetchSolanaPrice();
+    if (!price) return;
+
+    const users = await UsersService.getActiveIds();
+    if (users.length === 0) return;
+
+    logger.info({ price, targetCount: users.length }, 'ğŸ“¢ Broadcasting Update');
+
+    const message = `ğŸš€ **Solana Update**\n\nPrice: **$${price}**`;
+    
+    await Promise.all(
+      users.map(id => 
+        bot.api.sendMessage(id, message, { parse_mode: 'Markdown' })
+          .catch(e => logger.warn({ id, error: e.message }, 'Failed to send'))
+      )
+    );
+  }
+
+  stop() {
+    if (this.intervalId) clearInterval(this.intervalId);
+    bot.stop();
+    logger.info('ğŸ›‘ System Shutdown');
+  }
+}
+
+const app = new Application();
+app.use('/health', healthRouter);
+app.start().catch(err => {
+  logger.fatal({ err }, 'Startup Failed');
+  process.exit(1);
+});
+
+process.once('SIGINT', () => app.stop());
+process.once('SIGTERM', () => app.stop());
+
+END FILE: ./backend/src/index.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/bot/menus.ts
+--------------------------------------------------------------------------------
+import { Menu } from '@grammyjs/menu';
+import { PriceService } from '../modules/crypto/price.service.js';
+// UPDATED: Correct path to the existing service file
+import { QueueService } from '../modules/scraper/queue.service.js';
+
+export const mainMenu = new Menu('main-menu')
+  .text('ğŸ’° SOL Price', async (ctx) => {
+    const price = await PriceService.fetchSolanaPrice();
+    await ctx.reply(price ? `ğŸ’ SOL: **$${price}**` : 'âš ï¸ Error', { parse_mode: 'Markdown' });
+  })
+  .row()
+  .text('ğŸŸ¢ Start Tracking @elonmusk', async (ctx) => {
+    await QueueService.addScrapeJob('elonmusk');
+    await ctx.reply('ğŸ•µï¸ Tracking started for **@elonmusk**.', { parse_mode: 'Markdown' });
+  })
+  .text('ğŸ”´ Stop Tracking', async (ctx) => {
+    // Note: In a real app you might want to pass the specific target dynamically
+    await QueueService.stopScrapeJob('elonmusk');
+    await ctx.reply('ğŸ›‘ Tracking stopped.');
+  })
+  .row()
+  .text('â„¹ï¸ Status', (ctx) => ctx.reply('âœ… Bot & Scraper Online.'));
+END FILE: ./backend/src/bot/menus.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/bot/bot.ts
+--------------------------------------------------------------------------------
+import { Bot, Context } from 'grammy';
+import { config } from '../core/config.js';
+import { logger } from '../core/logger.js';
+import { UsersService } from '../modules/users/users.service.js';
+import { mainMenu } from './menus.js';
+
+// Define Custom Context if needed later
+export type MyContext = Context;
+
+export const bot = new Bot<MyContext>(config.BOT_TOKEN);
+
+// 1. Install Plugins
+bot.use(mainMenu);
+
+// 2. Commands
+bot.command('start', async (ctx) => {
+  if (ctx.from?.id) {
+    await UsersService.register(ctx.from.id, ctx.from.username);
+  }
+  await ctx.reply('ğŸš€ **Welcome to Connor Bot!**\n\nYou are now subscribed to Solana updates.', {
+    parse_mode: 'Markdown',
+    reply_markup: mainMenu,
+  });
+});
+
+// 3. Error Handling
+bot.catch((err) => {
+  logger.error({ err }, 'Global Bot Error');
+});
+
+END FILE: ./backend/src/bot/bot.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/core/db/index.ts
+--------------------------------------------------------------------------------
+import { drizzle } from 'drizzle-orm/libsql';
+import { createClient } from '@libsql/client';
+import { config } from '../config.js';
+import * as schema from './schema.js';
+
+const client = createClient({
+  url: config.DATABASE_URL,
+});
+
+export const db = drizzle(client, { schema });
+
+END FILE: ./backend/src/core/db/index.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/core/db/schema.ts
+--------------------------------------------------------------------------------
+import { sqliteTable, int, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// --- TELEGRAM USERS ---
+export const users = sqliteTable('users', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  telegramId: int('telegram_id').unique().notNull(),
+  username: text('username'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isActive: int('is_active', { mode: 'boolean' }).default(true),
+});
+
+// --- SCRAPED POSTS ---
+export const posts = sqliteTable('posts', {
+  id: text('id').primaryKey(), // The X Post ID
+  content: text('content'),
+  author: text('author').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastScraped: text('last_scraped'),
+  
+  // Metrics
+  views: int('views').default(0),
+  likes: int('likes').default(0),
+  reposts: int('reposts').default(0),
+  replies: int('replies').default(0),
+});
+
+// --- METRIC SNAPSHOTS (History) ---
+export const snapshots = sqliteTable('snapshots', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+  timestamp: text('timestamp').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  
+  views: int('views'),
+  likes: int('likes'),
+  reposts: int('reposts'),
+  replies: int('replies'),
+});
+
+END FILE: ./backend/src/core/db/schema.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/core/logger.ts
+--------------------------------------------------------------------------------
+import pino from 'pino';
+import { config } from './config.js';
+
+export const logger = pino({
+  level: 'info',
+  transport: config.NODE_ENV === 'development' ? {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      translateTime: 'HH:MM:ss Z',
+      ignore: 'pid,hostname',
+    },
+  } : undefined,
+});
+
+END FILE: ./backend/src/core/logger.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/src/core/config.ts
+--------------------------------------------------------------------------------
+import { z } from 'zod';
+import 'dotenv/config';
+
+const envSchema = z.object({
+  BOT_TOKEN: z.string().min(1, "Bot Token is required"),
+  // Default to local relative path for dev; Docker overrides this via ENV
+  DATABASE_URL: z.string().default("file:bot.db"),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+});
+
+const processEnv = envSchema.safeParse(process.env);
+
+if (!processEnv.success) {
+  console.error("âŒ Invalid environment variables:", processEnv.error.format());
+  process.exit(1);
+}
+
+export const config = processEnv.data;
+
+END FILE: ./backend/src/core/config.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./backend/package.json
+--------------------------------------------------------------------------------
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "db:push": "drizzle-kit push",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@grammyjs/menu": "^1.3.1",
+    "@libsql/client": "^0.15.15",
+    "bullmq": "^5.66.4",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.1",
+    "express": "^5.2.1",
+    "grammy": "^1.38.4",
+    "ioredis": "^5.8.2",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.3",
+    "playwright": "^1.57.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "drizzle-kit": "^0.31.8",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+END FILE: ./backend/package.json
+
+--------------------------------------------------------------------------------
+START FILE: ./dump_project.sh
+--------------------------------------------------------------------------------
+#!/bin/bash
+
+# Output file name
+OUTPUT="project_context.txt"
+
+# Clear the output file if it exists
+> "$OUTPUT"
+
+echo "Generating project dump into $OUTPUT..."
+
+# 1. Write the Directory Structure
+echo "============================================" >> "$OUTPUT"
+echo "DIRECTORY STRUCTURE" >> "$OUTPUT"
+echo "============================================" >> "$OUTPUT"
+
+# Use 'tree' if available, otherwise fallback to 'find'
+if command -v tree &> /dev/null; then
+    # -I excludes patterns
+    tree -I 'node_modules|dist|coverage|.git|.next|build' >> "$OUTPUT"
+else
+    find . -maxdepth 3 -not -path '*/.*' -not -path './node_modules*' -not -path './dist*' -not -path './coverage*' >> "$OUTPUT"
+fi
+
+echo "" >> "$OUTPUT"
+echo "============================================" >> "$OUTPUT"
+echo "FILE CONTENTS" >> "$OUTPUT"
+echo "============================================" >> "$OUTPUT"
+
+# 2. Find and read files
+# Add or remove file extensions in the grep pattern as needed
+find . -type f \
+    -not -path '*/node_modules/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/.git/*' \
+    -not -path '*/coverage/*' \
+    -not -name 'package-lock.json' \
+    -not -name 'yarn.lock' \
+    -not -name '.env' \
+    -not -name '.DS_Store' \
+    -not -name "$OUTPUT" \
+    -not -name "*.png" \
+    -not -name "*.ico" \
+    -not -name "$0" | while read -r file; do
+
+    echo "" >> "$OUTPUT"
+    echo "--------------------------------------------------------------------------------" >> "$OUTPUT"
+    echo "START FILE: $file" >> "$OUTPUT"
+    echo "--------------------------------------------------------------------------------" >> "$OUTPUT"
+    
+    cat "$file" >> "$OUTPUT"
+    
+    echo "" >> "$OUTPUT"
+    echo "END FILE: $file" >> "$OUTPUT"
+
+done
+
+echo "Done! Code and structure written to $OUTPUT"
+END FILE: ./dump_project.sh
+
+--------------------------------------------------------------------------------
+START FILE: ./.dockerignore
+--------------------------------------------------------------------------------
+**/node_modules
+**/dist
+.git
+.env
+.DS_Store
+
+END FILE: ./.dockerignore
+
+--------------------------------------------------------------------------------
+START FILE: ./pnpm-workspace.yaml
+--------------------------------------------------------------------------------
+packages:
+  - 'backend'
+  - 'frontend'
+  - 'scraper'
+
+END FILE: ./pnpm-workspace.yaml
+
+--------------------------------------------------------------------------------
+START FILE: ./pnpm-lock.yaml
+--------------------------------------------------------------------------------
 lockfileVersion: '9.0'
 
 settings:
@@ -7798,3 +8707,2152 @@ snapshots:
       zod: 4.2.1
 
   zod@4.2.1: {}
+
+END FILE: ./pnpm-lock.yaml
+
+--------------------------------------------------------------------------------
+START FILE: ./docker-compose.yml
+--------------------------------------------------------------------------------
+name: connor-bot
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: bot_redis
+    restart: always
+    command: redis-server --save "" --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+  scraper:
+    build:
+      context: .
+      dockerfile: ./scraper/Dockerfile
+    container_name: bot_scraper
+    restart: always
+    ipc: host
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=file:/app/data/bot.db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - HEADLESS=true
+      # - PROXY_URL=http://user:pass@host:port
+    volumes:
+      - ./scraper/sessions:/app/sessions
+      - sqlite_data:/app/data
+      - ./scraper:/app/scraper:rw  # Hot Reloading
+      - ./scraper/package.json:/app/scraper/package.json
+      - ./pnpm-lock.yaml:/app/pnpm-lock.yaml
+
+volumes:
+  redis_data:
+  sqlite_data:
+END FILE: ./docker-compose.yml
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/tsconfig.json
+--------------------------------------------------------------------------------
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "sourceMap": true,
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src/**/*"]
+}
+
+END FILE: ./scraper/tsconfig.json
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/src/index.ts
+--------------------------------------------------------------------------------
+import { Worker } from 'bullmq';
+import { ScraperService } from './core/scraper.js';
+
+// --- PROXY CHECK & PAUSE LOGIC ---
+const checkProxy = () => {
+  if (!process.env.PROXY_URL) {
+    console.warn("\nâš ï¸  WARNING: PROXY_URL is missing.");
+    console.warn("â¸ï¸  Scraper is PAUSED. Waiting for configuration...");
+    console.warn("ğŸ‘‰  To fix: Add PROXY_URL to your docker-compose.yml or .env file and restart.\n");
+    
+    // Keep the process alive indefinitely so Docker doesn't restart it constantly
+    setInterval(() => {}, 60000); 
+    return false;
+  }
+  return true;
+};
+
+if (checkProxy()) {
+  const REDIS_CONFIG = {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379')
+  };
+
+  console.log("ğŸ‘· Scraper Worker Started. Waiting for jobs on 'scraper_queue'...");
+
+  const worker = new Worker('scraper_queue', async (job) => {
+    console.log(`ğŸš€ Processing Job: ${job.name} for @${job.data.target}`);
+    
+    try {
+      const scraper = new ScraperService(job.data.target);
+      await scraper.scrape();
+      console.log("âœ… Job Complete");
+    } catch (error) {
+      console.error("âŒ Job Execution Error:", error);
+      throw error;
+    }
+  }, { connection: REDIS_CONFIG });
+
+  worker.on('failed', (job, err) => {
+    console.error(`âŒ Job ${job?.id} failed:`, err);
+  });
+
+  process.on('SIGTERM', async () => {
+    await worker.close();
+    process.exit(0);
+  });
+}
+END FILE: ./scraper/src/index.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/src/db.ts
+--------------------------------------------------------------------------------
+import { createClient } from '@libsql/client';
+import { drizzle } from 'drizzle-orm/libsql';
+import * as schema from './schema.js';
+
+// Docker Volume Path is the source of truth, fallback to local relative
+const url = process.env.DATABASE_URL || 'file:../backend/bot.db';
+
+const client = createClient({ url });
+export const db = drizzle(client, { schema });
+
+END FILE: ./scraper/src/db.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/src/schema.ts
+--------------------------------------------------------------------------------
+import { sqliteTable, int, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// --- TELEGRAM USERS ---
+export const users = sqliteTable('users', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  telegramId: int('telegram_id').unique().notNull(),
+  username: text('username'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isActive: int('is_active', { mode: 'boolean' }).default(true),
+});
+
+// --- SCRAPED POSTS ---
+export const posts = sqliteTable('posts', {
+  id: text('id').primaryKey(), // The X Post ID
+  content: text('content'),
+  author: text('author').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastScraped: text('last_scraped'),
+  
+  // Metrics
+  views: int('views').default(0),
+  likes: int('likes').default(0),
+  reposts: int('reposts').default(0),
+  replies: int('replies').default(0),
+});
+
+// --- METRIC SNAPSHOTS (History) ---
+export const snapshots = sqliteTable('snapshots', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+  timestamp: text('timestamp').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  
+  views: int('views'),
+  likes: int('likes'),
+  reposts: int('reposts'),
+  replies: int('replies'),
+});
+
+END FILE: ./scraper/src/schema.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/src/core/scraper.ts
+--------------------------------------------------------------------------------
+import { Page } from 'playwright';
+import { BrowserEngine } from './browser.js';
+import { db } from '../db.js';
+import { posts, snapshots } from '../schema.js';
+import { sql } from 'drizzle-orm';
+
+export class ScraperService {
+  private engine: BrowserEngine;
+
+  constructor(private targetAccount: string) {
+    this.engine = new BrowserEngine();
+  }
+
+  async scrape() {
+    console.log(`ğŸ•µï¸ Starting surveillance on @${this.targetAccount}`);
+    const page = await this.engine.launch();
+
+    try {
+      await page.goto(`https://x.com/${this.targetAccount}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
+
+      // Simple Login Check
+      if (page.url().includes('login')) {
+        console.warn('ğŸ”’ Login Wall Detected. If headless, this may fail.');
+      }
+
+      // Scroll & Scrape
+      for (let i = 0; i < 3; i++) {
+        await page.keyboard.press('j');
+        // Next post shortcut
+        await page.waitForTimeout(2000);
+        await this.processVisiblePost(page);
+      }
+
+    } catch (e: any) {
+      console.error('âŒ Scrape Error:', e.message);
+    } finally {
+      await this.engine.close();
+    }
+  }
+
+  private async processVisiblePost(page: Page) {
+    try {
+      const data = await page.evaluate(() => {
+        // Selectors must remain as per X DOM, but we process them as posts
+        const article = document.querySelector('article[data-testid="tweet"]');
+        if (!article) return null;
+
+        const getText = (s: string) => article.querySelector(s)?.textContent || '';
+        const getMetric = (label: string) => {
+           // X uses various labels, we map to reposts internally
+           const el = article.querySelector(`[aria-label*="${label}"]`);
+           return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
+        };
+
+        const link = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
+        const id = link?.split('/status/')[1];
+
+        if (!id) return null;
+
+        return {
+          id,
+          content: getText('[data-testid="tweetText"]'),
+          likes: getMetric('likes'),
+          reposts: getMetric('reposts'), // Fetched as reposts
+          replies: getMetric('replies'),
+          views: getText('a[href*="/analytics"]')
+        };
+      });
+
+      if (data) await this.saveData(data);
+
+    } catch (e) {}
+  }
+
+  private async saveData(raw: any) {
+    const parse = (str: string) => {
+      if (!str) return 0;
+      let n = parseFloat(str.replace(/,/g, ''));
+      if (str.toUpperCase().includes('K')) n *= 1000;
+      if (str.toUpperCase().includes('M')) n *= 1000000;
+      return Math.floor(n);
+    };
+
+    const clean = {
+      id: raw.id,
+      content: raw.content,
+      author: this.targetAccount,
+      views: parse(raw.views),
+      likes: parse(raw.likes),
+      reposts: parse(raw.reposts),
+      replies: parse(raw.replies),
+      lastScraped: new Date().toISOString() // Fixed: matched to schema
+    };
+
+    // Upsert Post
+    await db.insert(posts).values(clean)
+      .onConflictDoUpdate({ target: posts.id, set: clean });
+
+    // Snapshot
+    await db.insert(snapshots).values({
+      postId: clean.id,
+      ...clean
+    });
+
+    console.log(`ğŸ’¾ Saved Post ${clean.id} | Likes: ${clean.likes}`);
+  }
+}
+
+END FILE: ./scraper/src/core/scraper.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/src/core/browser.ts
+--------------------------------------------------------------------------------
+import { chromium } from 'playwright-extra';
+import stealthPlugin from 'puppeteer-extra-plugin-stealth';
+import path from 'path';
+import fs from 'fs';
+import UserAgent from 'user-agents';
+
+// Apply Stealth Plugin
+chromium.use(stealthPlugin());
+
+export class BrowserEngine {
+  private context: any = null;
+  private userDataDir: string;
+
+  constructor(private accountId: string = 'scraper_bot') {
+    this.userDataDir = path.resolve(process.cwd(), 'sessions', accountId);
+  }
+
+  async launch(): Promise<any> {
+    try {
+      if (!fs.existsSync(this.userDataDir)) {
+        fs.mkdirSync(this.userDataDir, { recursive: true });
+      }
+
+      const userAgent = new UserAgent({ deviceCategory: 'desktop' }).toString();
+      const proxyUrl = process.env.PROXY_URL; 
+
+      console.log(`ğŸš€ Launching Stealth Browser (${this.accountId})...`);
+      if (proxyUrl) {
+         console.log(`ğŸŒ Using Proxy: ${proxyUrl.replace(/:[^:]*@/, ':****@')}`);
+      }
+
+      this.context = await chromium.launchPersistentContext(this.userDataDir, {
+        // Fix: Removed "channel: 'chrome'" to use the bundled Docker Chromium
+        headless: process.env.HEADLESS !== 'false',
+        viewport: { width: 1920, height: 1080 },
+        userAgent: userAgent,
+        proxy: proxyUrl ? { server: proxyUrl } : undefined,
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage', // Vital for Docker
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+          '--window-size=1920,1080',
+        ],
+        ignoreDefaultArgs: ['--enable-automation'],
+        acceptDownloads: false,
+        bypassCSP: true,
+      });
+
+      const page = this.context.pages()[0] || await this.context.newPage();
+
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Upgrade-Insecure-Requests': '1',
+      });
+
+      return page;
+    } catch (error) {
+      console.error('âŒ Failed to launch browser:', error);
+      throw error;
+    }
+  }
+
+  async close() {
+    try {
+      if (this.context) await this.context.close();
+    } catch (error) {
+      console.error('âŒ Error closing browser:', error);
+    }
+  }
+}
+END FILE: ./scraper/src/core/browser.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/Dockerfile
+--------------------------------------------------------------------------------
+FROM mcr.microsoft.com/playwright:v1.57.0-jammy
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
+WORKDIR /app
+
+# Install Deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scraper/package.json ./scraper/
+RUN pnpm install --frozen-lockfile --filter scraper...
+
+# Copy Source
+COPY scraper ./scraper
+WORKDIR /app/scraper
+
+# Permissions
+RUN mkdir -p /app/data && chmod 777 /app/data
+
+# Dev Mode
+CMD ["pnpm", "dev"]
+END FILE: ./scraper/Dockerfile
+
+--------------------------------------------------------------------------------
+START FILE: ./scraper/package.json
+--------------------------------------------------------------------------------
+{
+  "name": "scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "bullmq": "^5.66.4",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.1",
+    "ioredis": "^5.8.2",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.3",
+    "playwright": "^1.57.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "user-agents": "^1.1.669"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/user-agents": "^1.0.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+END FILE: ./scraper/package.json
+
+--------------------------------------------------------------------------------
+START FILE: ./.gitignore
+--------------------------------------------------------------------------------
+# Dependencies
+node_modules
+.pnpm-store
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build outputs
+dist
+build
+.next
+
+# Database
+*.db
+*.sqlite
+*.sqlite-journal
+drizzle/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright / Scraper Sessions
+scraper/sessions
+backend/sessions
+test-results/
+playwright-report/
+blob-report/
+
+# IDEs
+.vscode
+.idea
+*.swp
+END FILE: ./.gitignore
+
+--------------------------------------------------------------------------------
+START FILE: ./data/bot.db
+--------------------------------------------------------------------------------
+
+END FILE: ./data/bot.db
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000002.sst
+--------------------------------------------------------------------------------
+  üñIİ ¦C¨	Cİ 	¨Ö İ İ Ğ frontend/middleware.tsx İ¦F	FÜ Ö Ö ÖÖ ÎÖ ÇÎÇ&CGO GO O òÿsrc İİ Aİ Jİ Zİ İ ¯İ ±İ ³İ µİ ¿İ Áİ Ãİ Åİ öİ øİ úİ ûü AJZ¯±³µ¿ÁÃÅöøúûü ô ô	h ô ô XYZ[\]^chip	Xİ 	YÖ 	Zİ 	[Ö 	\İ 	]Ö 	^û² 	cİ 	hİ 	iÖ 	pû² û› û› nextĞ ‘node_modules/.pnpm/next@16.1.1_@babel+core@7.28.5_babel-plugin-react-compiler@1.0.0_ ôdom@19.2.3_react 	 /€ önext û›û› <<Ö ÁÖ ¦&	&»÷ Á¦v	İ 	v³Q Ñ qÓ/package.jsonEğqq	) )‹¤ëÔ·ÇÑä	Ñİ 	äÒ ¥src/proxyÊÇ. æ. æ. jøñ*Ç Ü EÜ iÜ ÉÜ ËÜ ÍÜ ÏÜ ÒÜ ÜÜ ŞÜ àÜ âÜ û Ü û  øÜÜ Ü backendkñ.dockerignore pnpm-workspace.yaml .git Block 9 ó-compose.yml scraper
+.gitT Ô.env data›)`ö$EiÉËÍÏÒÜŞàâû ûûû
+Ö hÖ VÖ —ûÖhV—Ö ZÖ Vx„ZVÜ a!	Üñ-domcaniuse-lite //ñsharpnext
+styled-jsx@ ö-postcssbaseline-browser-mapping@swcaÖ ûÖ ûş Ô	Ôè÷ûûş ‹’	’± Bù	Bİ 	ù> Vô/src/instrumentationQòLİ íí"îïğñòóôõö÷øùúûû ûü ûı 	ìñ 	îİ 	ïÖ 	ğİ 	ñÖ 	òİ 	óÖ 	ôİ 	õÖ 	öİ 	÷Ö 	ø ÷	úİ 	ûû Ö 	ûü İ 	ûı Ö İ ÇÜ	Ü² 	 Q¦CªÍª* Ó ô ¦Ü 2Ü HÜ YŞñglobals.css 
+layout†BpagZô7favicon.ico 2HYïï ï!NextFeatureTelemetry_category_tbdÜ vÜ }r ñ9error.js navigzò-types
+image.d.ts 
+headers.js dynamic rrouter ¢constants Tserv ócompatroot-param' 
+Û
+” x x  R	jestZ j Cjs 	… Ñjs web-vital × 9 ‘legacy*W.js # bjs og* Á	README.md y òjs 
+license.md  “js clienš >æ ƒjs 	linkY rjs app 
+XAdoc §head.js Ş ´d.ts scrip{ Âog.js 
+index: R	form ° İ	R C S
+cachè/ Cjs 	X Bjs   Ejs – Bjs 
+AC ÑdistexperiÂ3l	¤js font
+8Ajs %.js appµ  O ,js v}¡ ’	1BÄRÄvR­	ò £  û	 k	kÁ©	ñggûF û ûF	® ñFskipTrailingSlashRedirectfalseû İwû	û£ èNûş 3
+ááÖ ÇáÇB‘ğ ‘M ‚
+·CagesôJ™AÖ éN ÿéÇûQûQ ûQÊ‘A BâB¢‡_ú+íí×× ×Ğ  ûûûûûûûûû–òÖ JÖ IJI$	$; ;•îÖ íîíX	û£ ¢óûş Ø ’‘	İ 	Ö 	öóØ Ø ØŠ›œŸ¡¢û±û± û±lrñ ñÕúñ ñ ãã ãvirtual file system+*	× ] şlï û!ï	®ï ïEVENT_BUILD_FEATURE_USAGEû!LP	Lûš 	Pû‡ ûœ ûœûœûœ ••ûG û$û(	û$ï 	û(ûF ûG?ß¾1ßÇ–  – – ÿ Ó tÓ	xÒ t02*ˆ27Ë	Ë†èóÔÇÃ¸+ïP)Ã Ã9USERgiestas
+SSH_CLIENT'fe80::8165:2178:2248:c6ed%eth0 59949 22npm_config_user_agent,pnpm/10.26.2 npm/? node/v20.11.1 linux arm64
+TEXTDOMAINpam_chksshpwdXDG_SESSION_TYPEttynpm_node_execpath</home/Ä á/.local/share/ˆ a.tools D-exe˜  ùSHLVL1
+MOTD_SHOWNpamHOMEY ‰OLDPWD ó/ProjectsSSH_TTY
+/dev/pts/0npm_¥o_json7; Å/connor-bot/A8 ¥.jsonDBUS	ô/BUS_ADDRESSunix:path=/run/user/1000/busFORCE_COLOR2LOGNAMEë'"p¹òverify_deps_before_runD:_$· `Xpnpm¬·CLASSuserf ôregistryhttps:// ø.npmjs.org/TERMxterm-256color[ ÊID4PATHû©˜ ŠO	oñ.bin:/snapshot/dist/node-gyp- 	QY P  4 !„ J©¤    Cusr/ß  s
+ 	   - Rgames  jNODE<¯~ §
+	LTname*úXDG_RUNTIME_DIR
+òLANGen_GB.UTF-8	LSñSûrrs=0:di=01;34:ln	 ñ6:mh=00:pi=40;33:so 45:d	 "bd W;01:c !or ñ1;01:mi=00:su=37;41:sg=30;43:ca=00:tw Ñ2:ow=34;42:st* A4:exo a2:*.7z v1:*.ace l &pk 'rc j b/ 5bz2 6cab "piİ †1:*.cratn &de' Edrpm4 'dw c 5ear# 6egg %sd g/ j/ 5lha# &lr$ ğ 6lz4# 'zh m< zÍ &pyH rl Ê k s# sá tŒt$ &ta_ titjtğ tÍ 'tx=  ¿ Etzstå uŒw† 5whl% &wi—` _ 5zip- &zok j Aavif% b5:*.jpÆ e xw X5:*.m& m' gL "bm} b5:*.pbª  g eb5:*.tg×W5:*.x0 x$ ` 6tif¹ &pn¬ )sv ¹ % "pc} %ovmm'm2% k 'we¬ 6webõ oé "mpÍo 4> 'mp "vo€R5:*.qf5:*.nu0 &wm &as rT6rmvG "fl)b5:*.av h5:*.fl T gçd &xcj "xwİW5:*.yš cî &em0 &og^ &oguåaac=00;36:*.au 'fl 5m4a 8mid i k% &p3 pa 5ogg r/ 5wav &og Eopus 5spx Dxspf ¤~=00;90:*#	 E.bak ‘crdownloa· å90:*.dpkg-dist%  :new +ol4 5tmp"  1oriØ ^ 6parY 5rej2 8rpmc 9rpm8 urpmsave/ &swm y :ucf½ Hucf-Y Fucf- ñ%npm_lifecycle_scriptnext devSHELL	/bin/bash	NODE_ï	*3@–	üÕk\
+9bin1
+ˆ	Ê ˜Æ ®Á ¨6$ùB #ùconcurrently@9.2.1U 	  ğ9X x İ/t o N°#— ƒçversion0.2.0!™ÿ	B °÷
+eventdevNO_AT_BRIDGE1Bnpm_@9¹ù§etc/npmrcV R R h ĞŠ/rcPWD*" cAOnpmL3?¯ONNECTIONCC% ñ	557:d4b8:b6f:ca8%eth0 22/ß ÿ_recursivetruePNPM_SCRIPT_SRC_DIRö [E_jsrÂnpm.jsr.io/- ¢mmand
+run-·	ƒ ZHOMEoãªINIT_CWD!) ˜ óôENVdevelopmentNEXTæñnodejs	TURBOPACKauto# ùPRIVATE_WORKER1 ñTRACE_IDe5079805f11201d8u ù4OPTIONS.--max-old-space-size=4031 --enable-source-mapsPORT3000__… ÒORIGINhttp:/X¢host:3000S8õfrozen_lockfile H ±OCESSED_ENVõó2DATABASE_URLfile:../backend/bot.dbRUST_MIN_STACK8388608¸ ¸@Z QDEFINfX òprocess.turbopack  Eenv.p  X ´BUNDLER"TI ("( ÒMINIMAL_MODEa  ˆgENV"ÿ
+D Ó?"  f X""(^ ¦ óAPP_NAV_FAIL_HANDLING 0  3PPR #  óCACHE_COMPONENTS+ +  2USE/ $ $ × ÓDEPLOYMENT_ID& 6& Ã ñEXPERIMENTAL_STATIC_<v_DEBUGGÑ )>  RFETCHŠ ÿ_KEY_PREFIX""*.  cMANUAL_~CPATH 22  + ÿROUTER_DYNAMIC_STALETIME"0"18 × 7 "300"/9 âFILTER_ENABLED®
+§ S8 ñ ˜{"numItems":2,"errorRate":0.0001,"numBits":39 ñHashes":14,"bitArray":[0,1,0 1
+  
+ 1 ,   _0,1]}Ä DÄ LÄ 0Ä 0Ã InullÅ /]}<ôVALIDATE_RSC_REQUEST_HEADER	4tON_HOVE_~¤OPTIMISTIC‚B¸& ¡MIDDLEWAREØÿETCH
+"flexible"3  SCROSS¯$ ! s$@ÏHTESTÊ: ©¿DIST_DIR6""Æ)¯.next/dev"x ƒáâCASE_SENSITIVEˆ¥ ÂREWRITES0{" ÷Files":[],"after ïfallback":[]}!ó  ÔTRAILING_SLAS' )  ÒDEV_INDICATORgã	' ù	_POSITION"bottom-left"K%YSTRIC¢"è¢& B_APPˆ &ŠTZE_CSMÿ “	‚) %y ÑCROLL_RESTORAÔ -  ñ
+IMAGE_OPTSû{"deviceSiz§õ640,750,828,1080,1200,1920,2048,3840],"imag4 ñ32,48,64,96,128,256,384],"qualitiZ á75],"path":"/_—F ñ","loader":"default","dangerouslyAllowSVG":‹"Õ,"unoptimized cdomainiÄremotePatter Wlocal {Œ ÿ
+name":"**","search":""}]}àşR¸·?""Ş6HASˆ ˆ ïCONFIG_OUTPUT I ÃI18N_SUPPORT$' öS' ÄN u _"".“  (NOôïURL_NORMALIZE »ˆEXTERNAL6 ƒ_RESOLVE‘ =	
+å/ -˜  ÷HAS_WEB_VITALS_ATTRIBUèí1 
+ïÿLINK_NO_TOUCH_STAv
+QASSETğ/¸  	\	ÕAUTH_INTERRUPİ	%7  ÒTELEMETRY_DISzGFéULTI_ZONE_DRAF¥$] Õ%HO^¢x¥ALLOWED_RE’O[]1^  rBROWSER<
+ñ_INFO_IN_TERMINAL"Ã"˜“MCP_SERVEÁQÏ_HAS_PERSISTÈSREACT“ sCHANNELõ 'Ã  BTRANS€_¸¸FúòEdgeRuntime"edge-r %"h 3mit| *§İ .ÿÿÿÿRt·/²EDGE_PROJEC7?""L ÿÿÿÿÿ¡¾s.GENTLYKE	|- E{£ARELAoó&"È´2 ñ£á?¸C£s§""«uÿÿÿÿ|MÿÿÿÿÿÿÿØá+ +¸ ¸¸—>ñ
+ûj{
+  "env": {},
+  "webpÉ! õ#A
+  "üB”1¢": {
+    "ÚHòBuildErrors": false
+  I ¥typedRoute a §distDir": 
+ ecleanD Atrue ñassetPrefix": "" òcacheMaxMemorySize": 52428800" òonfigOrigin": "next.^)2.tsF õuseFileSystemPublic³ € rgeneratî &Id, IEtag2 òpageExtensions": [61tsxx 3  "‚ F  "j qjs"
+  ]¿ ¡poweredByHİF_ ycompress !s¡	"€ A  64e    75 A828,¡ U  108 0" %92 >" A3840 µ ˆ ƒ"÷ D  32` : $64 $96
+ 1‰ %25 9384c z" {"# €" " EFileD&  l"$ [Á ädisableStaticIVÜ§ ò"minimumCacheTTL": 144u–  "formatõa/webp" k ámaximumRedirec4 3d 5#tLocalIPf& [#ˆ" c=&òtSecurityPolicy": "®-ù-src 'none'; frame „sandbox;EN áDispositionTypQ¤attachment, ¦#A·# ¸# Á#" "21  } :$¿¨$s )75= 	u$.¶¢devIndicatÔ® "ï 9": b&8 ÁonDemandEntr%%)õmaxInactiveAge": 600,õpagesBufferLength": 5T QbasePf%õssassOptU²tìGÑ CHi18nÉ²productionBÇ(S².:Map£‚excludeDÃ%aMomentË˜ereactPT ™Profiling„ % ¨StrictMode  2Maxás6!§"httpAgentô Ê£"keepAlive4Bloggƒ Q õexpireTime": 3153p sôRPageGó¡ionTimeout¹Uñ modularizeImpor¶&õ@mui/icons-material	©nsform":, ²/{{member}}öIÕdÛh K  > ÿ	outputFileTracingRoot": ~*”á"cacheComponenñ  ELifeê z° Astaloû÷  "revalidate": 9 ¡Â": 429496729 }Ôfsecondì	` $ _ 1 ] 6¸U 3min«eµ n W :360Y Ohour¬ R
+/36;864Z ?dayY C 
++48[ Oweek\ E ] [25920^ 5max.	½D ] ¾ğ°bHandle{å"N€ è"useSkewCookie»²  "cssChunkÕùô  "multiZoneDrafÙÑ  "appNavFailˆ A ! óprerenderEarlyExitËæ "œPqMinificŠ
+  ülinkNoTouchStartº ÅaseSensitiveÓ
+ ğNQOnHov dpreloaÎ$Onc VP[ QrFiltD   
+èm QfetchN	;Keyèq  "prox vetch": ·/+±optimisticC” K 
+.bmanual BW† 8cpu	mXüBasedWorkersCoungtimgOptC;[	8ù	CgOptC5InS¹7» ! ùMaxInputPixels": 268402689' ïSequentialReadj ËSkipMetadata  ÚsrFlushToDiskwà QThreaV\1zeCn QnextS ÄscrollRestorÀ@ ‚external ‚O×~zedLoadACgzip÷v|raCompa©CesmEq sş ìfullySpecifiedÅ wcTraceÜí1ceS% Û	I	ò  "largePageDataBy3128ã^!dEƒ‘parallelSCÆ^ 
+% QBuild¯ ( +prÙ ÊauthInterrupÒ[‡ÃX ¥ ZReact]qviewTraˆÂã ñremoveUncaughtErrorAndReje¤
+bListenÂ7 6îRSCRequestHead( Astalç		É÷6": mø	D": 3KxûreactDebugChannelF¥	?Hmr} _ S
+:Max2) ¢inPagesPerdS": 25œ tW± _inlinº 4use¦ X!|NotFoun	b1ÁInfoInTerminJF NlockÄá  "isolatedDev©
+)å dMaxBodÓd104857j	ı"hideLogsAfterAboù2mcp
+` t{:ïoForDev, º ò [ óInferModuleSideEffÕ. 3P	]D "lucide-|€?rdate-fn¸ ‡lodash-e Vramda4 Fantd Q ¦-bootstrap WahookF ²@ant-designÎ+ Á@headlessui/P  o-float!  !ro ‡/20/soli£ # 4# doutlinµ  "@visx/viZ¢  "@tremor| · 8rxjû Emui/¼j ­B gechartF 7-us’ e5 @ g/schem³ Aplat+„ 2  G-noda 9 -²s A >bun (sqø t osql-ms _ysql2L ?-pg osqliteÅ ! ¥ A ?was% A _nativ/ >rpc  wrpc-htt#^‡typeclasí 	^¶×opentelemetryr lx-ui/cor¢  77 btabler*Jmui-K D 6/aiG  b ë 0 cØ	 H d fıH ?fa6© f±	1 a g o` /gr hH 'hiú‘ /imI iy ?io51 /li$?lib2 u ml« pÜ r Ç»]s0 s0 tÀ /tfI t /vs"wiK]ÑhtmlLimitedBoû
+ò"[\\w-]+-Google| - ñw|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot ô
+Preview|applebot|facebookL&hi ô5catalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriq aYeti|grweblighça"bundlàs
+¡Dependenci,ú"y€y÷>·M Nö;İj:rã	²	rIdæ
+L×+wá"exportPathMapyÏ
+}P P ) )!ü ü 	T Q/dev
+ ñ h Ã + .c™“ 111, edg
+ rfirefox øsafari 16.4P < DGÿÿ,sxDv/x52vr7zDAAKyJ8OdaTRXZ90VqPXMUUYC1W8++o= 111f97b141f6ae885a5f6da556f541df@008ad8d0d3bc00ac592c305812a10ed3e7faf41cf0c6b7a73a89f0e2d5cc8290@8e1287225b0149773701da927d037b9eef03e46c68207f6d3fe42664e2fa006f  24.12.0ï ) ) 
+) ) ) ) *P 5P ’	ï 	ï ï û.ï	®P^..DkøİÖ ÇİÇ×× ×Ğ  ûG û+û,	û+ï 	û,Q^(e¨ññ ñ\èfAÖ åŒ ŠåÇÖ "`û-"± Š± ›± ± ¡	+ñ 	Ø 	P 	“j “± ±˜² ™² š²     ±â_÷ñ /ñ .ñ ’ñ ¥ñ ìŞ_õtsxjsxtsjs)‹¤ë!ö‹ã  ï ï	h ï ïù.eÈÙ „ÈÇÜ lŒiƒû¯$zod-ó0ion-error@4.0.2_zod@4.2.1string_decoder@1.3.0has-property-dñ ñors@1.0.29@babel+helper-mç-…Óforms@7.28.3_' Bcore ?5l
+òdenque@2.1.0is-docker@3.0.0dq-name@4$ ö'@esbuild+linux-arm64@0.18.20^eslint-import-resolver-Ç!ƒ@3.10.1_) cplugin0 s@2.32.0 ò@9.39.2_jiti@2.6.1_@standard-¾+utils@0Hñfunctions-have-names@1.2.3file-entry-¤!@8ã ã
+keyv@4.5.4>@– £community+ f ?4.9 
+±playwrightò
+@1.57.0on-exit-leak-freqñ2has-bigints@1`r ñvisitor-keys@3.4.3range-pars;Qupports-›^†@7.2.0&>^ãuild-optional-¶¡s@5.2.2+@™+% 9a7is-
+cobject° Ádecimal.js-®ñ@2.5.1data-uri-to-bx11» a-conveR0.1Kƒ bcript-+ú 68.5B& _Õ : ò@5.9.3dateformat@4.6.3is-gi4or-8ó@1.1.2debug@3.2.7)V}ãÔor-identifiermafill-¦ñ	@7.1.1path-is-absoluteÒ¶1is-async{ 21 ñ
+array.prototype.findlastÇñ5loose-envify@1.4.0sharp@0.34.5fast-copy_q2picocdô 1brace-expans÷ B12~ arepeatµ 40jnr@3.6.0_¢=%_o
+_ ’is@18.3.1 < ñ
+3_redux@5.0.1pino-std-sÌqizers@7³ò	lock.yaml side-c!-weakmap¯ 42ÖS-bindÛ2es›1s@14 ô ‚trimstar÷ ò8@azure+keyvault“ò4.10.0)drizzle-orm@0.45.1_@libsql+¦ó	@0.15.15lodash.isintegÿó$4@humanfs+node@0.16.7
+etag@1.8.1ignore@5.3.2
+#Uì ñ5natural-compazS4.0£qd3-timeÖó4process@0.11.10â Score-¶ 11.1œC@swcyAs@0.Ê rfinalhå<á1escape-html• ”3defineÚiŒ214Ğı4@7.37.5üøon-finished@2.4.1}ô
+25.12clone-deep@0.2.4¡ô kit@0.31.8laz0åTjson–3‚ôo“@8.4.31L* }ô15victory-vendor@36.9.2mixin/2V ¡d3-interp’’31\ !se©]2.1Å
+ %isî2$¡tree-kill*?2Ù ñ 10fs.realpath¯30… Dhttp$r2.0.5Ã ".ea$KÁ9forwardedká0which-colle‡Y 12úãview-byte-lengv 12şaáracceptš 0ÊQ1.0.4Xò8.2.2@js-joda+cGñ6.5ansi-styles@4$°‡ningcss-àã-musl@1.30.2L z	A5tÂ‘-stream@3ËwregexpOóflags@1.5.4
+ajv@6.12.6is-wsl8 Ö’t@2.3.1O¨àCtype¥ñ@neon-rs+load@0HRread[TÔ ñ4.7.0 buffer-equnbnstant^1âcsstype?ñ 3hermes-estreoX5.1ìccron-İq4.9.0ÿó pretty@13.1.37\
+6ÿ jsx-a11y@6.10.29ºDbodyg ’1.19.6@U 3+jsIò@pinojs+redact@0.4.0raw-body@3oÿfs-extra@10.1.0x– \ ç™(  û ! 6  ó&__422953905de6faf40ab38667aa79ba19event-target-shimDEset`,(ÂÓ§&SationF ¢s@7.27.2™AthisÍ14J3ettM ±0shebang-ï ’0expresi
+21a-widtha3is-I!iz| ñW_81 ¹ö1.0.0-beta.6-ea4d663iteratorb< ‘5joyconPÄ1is-numberŒ1l	Wb 1ormŞ b ÊÃ+–r@9.1.8_ 1‘semver@6°ƒmerge-d³%or½ñnode-fetch@2.7.0	!=
+Ÿ 7+}Å0.19.1unrslA@1.1ö 			61¥ Qunpi=Z0.0#nÒ21'q-only@0ù<˜î+åŞä7rñes-toolkit@1.43.0uri-js@4úó	qs@6.14.0
+clsx† ĞÂ–ñpp@4.12.2has-flag@4M
+Üqgroupbyi13; MŸ!-s¸*-zø0scheduler@0.27.0{“20A-fresh@3*
+ÎÑ5.15word-wrÉ
+Á2.5tslib@2
+Aloggí3.0def›
++…@5.4.0r
+qargumen»1
+3’require-.3oryWrhasownòPéQñ2.7universalify/ ñ1@nodelib+fs.walk„ô8@tailwindcss+n	ó4.1.18js-tokens¨^3+d3êb fast-”	t¯2ing D1.03Z-warningĞñ0safe-array-concæ¡1.3cliui11>‘-®?9.2ö	·	ÇLk+¸ Cglobq
+levn@0İxê{ØO2.12?=ñ._t_b301e9e2b4d4fdab13a3de978682558dagent-base@7.1.4ee-firWÍ	2ñ2glob-parent@5.1.2
+tr46@0.0.3ruã1allù2.0$@img+sharp-libvipu	'4qtracing¼r1reusX1.0¿	®	¢(@radix-ui©‹A !2_Ş¸ádunder-protoÖ 1vQscaleÓ9@rtsao+sccßJincludesz29'µ	Óscope-manager#bòassign@4.1.7ioredis@5.8.2]¡ äZS2.2!FyŒf‰3.9getğ @+< !rcq3http¤1xy-$üƒ6typedH é0.7 @next+swcJagnu@16o—2.0.0toQH1js‹ò64@3.7.8tedious³„0safer‰2v!Í·util@1.13.1= y8.6.2)€]oxideª !iü Cmise7Ú+M!25ä‰	emitter3) 7Èa-checkŞó0cookie@0.7.2I !msl0Iò 6.0.2espree@1Œ
+rd3-easÏc1bytrS2
+vaB	2½Asmoou	20.4ò_ ^R3toÔ	Ó	bstop-{	3ion
+ oS-.0‘8ë&æ 			âóis-inside-containas0flat»â4.0.1webidl-šï6!@3 Risex¡
+ô0 @jridgewell+traceµñ@0.3.31picomatchµ13z	1keyÈñ1language-subtaë
+QistryB C23ÀDfrom&U2.0.8
+x7.7.3/3°áñ 2shallow-clon(C.2Ôñtor@0.9.4minimiª²2.8locateá6e¤*use-sync-¶A-sto/:6.0şTemoj	9H¥q8.5.6&Texist¦t½~+£1-idŠ11 12@1ü*+à	u.@unrs+Àybinding¬ ù
+ƒis-globÌ=„templateÛ2esÁdeşbstripL6com/	š1is-plaÍ4©Qabort±4rol‘2
+uuid@8µ¿ ‚-pkg-mapOô 0for-in@0.1.8y±4.4.3
+depdD	30Ê	E1s@4èô%damerau-levenshtein@1.0.8napi-postinstall@0.3.4t
+£isomorphicƒ0”
+¡is-callabdR2.7xÕ-Õ:-ÂlÈ‹°Ù_; Ë ñ_ty_7aa0235fa5da3ecface6d33ebb0dd580	zodë 1-3Svq7.3.6¤qfns@2.3ê	„enhanced#r@5.18.4~bsymbol10!,cˆ(¶Cmuslv1.2.4?j,g4.3.6_ Ç&  ‘find-up)£0arr-uniÙ¢0fetch-bF
+Ñ2.0 possible˜S1.0ÎRcommoÛs0
+rfdcŠ”-”	+20ù‚a.flatm¼T3.3oThrana]0îü1åA	jwaîñ1@alloc+quick-lru@5ï;O2.15ÎYˆ&¶is-boolean'statuses“ ‘2
+jsbi@4y$@õñteam+brocli@0.10.2undici€Qs@6.2š
+Tyargs+2Jò$@humanwhocodes+Ø	o‘1open@1$k2@P+¡"ki 1M1ullaÑ-code-point@3ù5is²33BhelpWc28.4e(²2msgpackrÂcQ 23Ş	4envÎ	±jsonfile@6­±UreleaG17·#stÕ}3.3.5A¶ rtosorteÍ14EBdeep®136nK Clru=5’¢acorn-jsxW_ ñ@8.15.0proxy-addr³7punycode†‰10}Më[<0r‰^µ45/3İ0.5.22] ›21P
+A-sige912âregex-te‹ ı1run¶ıqjs-md4&b2bal4	£!iõ!en´81_	æ1uri224 ‘ãBown×æÕ`–s0.4.2°Emsalß4hRmini¸	97“fpuppetee¯Éçstealth@2.11.2jÖØ6 c	˜2_Lqpec+ts-“O0#$4@Úb <ct+ À¦3g!
+@(15‚abstractø!2por‹10]1@17P$âslist@4.28.1³vñ1.1get-intrinsice0dom€5²"+\r-withouz‚S0.1î|p2Tpino.X¡s@16.4.0Du_úRquery¡
+ú ipaddr.js@1.9 ˆ!@3©
+base64-( r5.1is ^Æ"A-kit‘q2
+tarn•12G] r5.0is[- 21ú .DÀ„2.0.1iñ!0dimmerársecure…
+J	!@4' !v
+nùÔ +! ‹“2²	O!AtypeÌ0.1inf@„@1.0.6&!ƒregisterõ ‘J	Y ÜÓ_İ
+9 @5.9.39L  #ts	U ; ”run-applR 77õ§2.19.3:g  ó project-service˜h c-limit·22Q-fromçQ2es›´-unscopablet
+2	jw?21$š +§0›h—qis-set®3g‹€ …2sta) ³5reselectà7{y2.0.3!Õ¢Öbmicro–ñ4.0.8is-bun-module¢ 10tdomexce+R0.0†Ñ@4.17.21luxò
+Q7.2œà3’ Cwsl¼0óô ñ"0.6formdata-polyfill@4.0.10fastq@1.20.1
+onceA0eS2-toK3tag¤Qroutè†¶9Ê“shebang-¦rö  ÎÁrest-pipelinµc2.2p[3Î rhelp-m}a0@ioŞ+X s¬ QdeepÍHŸws@8.18.1àºE
+pumQ3d3-+%ƒ ıt¾R0.99×-‰
+*Ì5?@7.÷
+concat
+s0.0.1“z½!alkZ8.0" ŒrÍ31$ c%Drame 0 ’tˆ?dèa9bas]‚2.9.11c$V©ç##2©Uñ 15.13.3d3-timEmƒdoctrinePN	4€(! [1.1D&™ tend-of S1.4.5L}-buffer{825“ñ @1.0.30001761|Rcolouš30¯3‚â $Aserv>3tic/js-yamlÚb1axe.)ƒ4.11.0&OÁ“C ) 5QdeteH	!bc_‚2aria-2-%‘prelude-ãQ2.1#np ñ ³0.23real-@ˆÇDauth/%d 2ÁBastq-flow@0kæMQ.valu 52.1Ä•(’2 Qjson5T C29äyw	‚q1call'3yó	ç™Aoxidœ³.18inheri€#Â4iconv-litĞ‚1
+tsx@4÷­+aUCbackó³sonic-boomÍônative-duplexpaimcfast-‡	İR1p-æ#Q
+glob+130Ü#dã?1.6 - 
+óFatraverA28.5¿Sshapefha@2.0.0(.5
+- V1.7CD-ç] 	As-functi²ƒ1magic¢@0.30.21  ö‘a÷ù2mime-db@1.54.0l×3I._ 
+ïscompile§K[³whatwg-urlº)QcloneÀ'v4.5.0ñ17.0unbox-primitiveå10$ã3\$òss-spawn@7.0.6bal-slo"60Ay62.1is-4Cviewû1lro
+v2mathPÜ	for-own,ú5grammy@1.38.4cr8.0.0J!isWó3.1get-caller-fi@	’5nanoidJ Ó1graceful-f:r1userO ?669‚ RoffseÕq4
+y18n“c8webEs7	U3.3.3¯‚isboolea.Ãİí	a16.1#×,3ind•36[±ty@4.13.0!= ×C 1sli«	S0.4O³!”Úõmap-codec@1.5.5reflect.get&!ofæB106 Â-map-supportƒ11MÙ	0¾1urlJ73
+û³lodash.oncIEesÑŸ@1.24.1k½Æ‡˜dir@2.4.1«Z!1_‘s·?3n{ 	¿preferences~ 53esoR-atom31€ï({0!1×+ *% Áyocto-queuerƒ0jsesc1ki	¸a1dotÁr7.2.3#ou
+4ùö!imE2.32ş.	ørßö_48e7a35ce426da0dc0c6a74c4274dd5ğ"isÉ¶Òredux-thunkÔ _ ±“1split2PQavaiÈsâ‚7wrappğ$¢2sprintfü²1.3flattea23iris-neg¯!zeı’safe-pushXk 20HÔ°4ô ition-group@4.4‚7q
+gopd@1`	z p Ã3ecdsa-sig^	t H115genîşÒ3"autoprefix–Z4.23_øø1p@8=,qrimrafRõ2@js-temporal+tA/qmedia–7ryallistB1"@*qjs+menuU"1_ >s#ts-apiı\_”ST”2pag‘6.2set-ú7ñ0define-lazy-propË ñ0chalk@4.1.2resolrt22.11vJesm-loadR6.5åâ-scope@8.4.0)14ç["s‘ 64ûQnfig-’@0.21.1ª2-unzd)>4*Ã
+p±Kİ!bweakse4~7*	13ˆ
+equals@5Ë snegoti !0”32dcallsi£!0¢.Ò9.2.1type-ig1©Ï)	ï53.00Qmsal-âQ3.8.4sqweakref	c1es-Şpropertyd31œ!isàÛ54)	5es
+5ä¡encodeurlC¡0ieee754”¡1gensync] Ñ0-beta.2arg5 41Ã
+Íb81;óApathK%5)7qcommanD9 æ+!@7K	-8 $0+nq-schema®t7get-˜ ˜Òatomic-sleepó Aha+$Vs2.0@nq+	d69ë¾"@3	»4ò0.8content-dispoJv U1esˆ#Íb2.2@§4ò0update-browserslistH2.3_ Eucolor-ª4fSymbolh%@ò?1+spr	S1.0Fd-valueÁ¬ñ"@tediousjs+conneãÖ¼!@6ø"`4¢bnode_}
+2s’2Yboxed?1tRapablÑ40)!!wsG15ei ì4fdir@6.5.0_<$#FE2mD2Sû(®Ä7Áimurmurhash‚ ¸!/ B-gnu–
+õ2bullmq@5.66.4 {{@19.2.7®S6.3!¡uiltin-typ‰Q.1d@Z¤js+toolkit=R +&_'’ a3fraë².js@5.3.4§1bomw10ü
+Bview·°>¬×_"re°%S4.3>
+–EQ8.5Zq-errorsÒëccharts *ä0.4.5escalad.„@0.6.1C-merge@3/	23Xe-gq0.4.1–.32 1d3-¹96?4]¹— 3i"&#ò jsonwebtoken@9ú9«ï
+‰51.2ö3a£0.25.1ax]£õñAansiÜ1a!ñ1.0electron-to-‡Bñium@1.5.267bl@6.1.6-2tasv.¤3is-shar-VH2isg 3X'r
+ñ19•ÉAflat¯	33%f×²validator-oğd3J F ¶4B"¹7.16.0has‰1w,s¾S2.0%²Ss-pre‚£ymlinks-fl= 40¤x/n…¸&38+6ŞÓ/Bscanš41.5)â2.2.3acorn@8Â=
+UwP11.6×¿(×ò 
+rxjs@7.8.2is5£8¡2/0.7¶ô tiny-invarian´'	t,	‘1.4prop$¨s@15.8.1O$reX*ñ2.3.5shell-quoR48.32(C-reswTclien$?YfastÍ'2Š	Z,sí30EQinspe@a13.4o(1mCwraT7ËAñtinyglobby@0.2.15for-each@0° Æcluster-keyõ2l İ ¦C¼	Cİ 	¼Ö İ İ Ğ -Gñproxy.ts İ¦ûF û&ûF	® MFÇ\Ÿtrueû&ŠD·
+fn	fİ 	n Œÿ³/.pnpm/next_’1cor!Ù>/€ ÷5 İİ cİ c&	&Ü Ö Ö ÖÖ ûü Ö íûü íİ ûş Ñû	Ñİ 	ûÜ ñ	src/instrumentation.tsxpøCûş $Ü #Ü GÜ NÜ ]Ü Ü ¨Ü ªÜ ¬Ü ®Ü ¸Ü ºÜ ¼Ü ¾Ü ïÜ ñÜ óÜ õÜÜ Ü Ê F®ònext-env.d.ts next.²’.ts 
+.gitÀ>ƒ .env 
+% Rmjs  ”publicw·.json srcª‚package õ#GN]¨ª¬®¸º¼¾ïñóõG‘@ûG	û@GGGş!ï û-ï	®ï ïEVENT_BUILD_FEATURE_USAGEû- G’ÕÖ ÇÕÇ9—BÀ	Bİ 	ÀÏ95src=x>Ö
+Ö \Ö VÖ —?G¯Ö\V—)‚ 1C¸»¸‚ ‚ ~ ] ôfavicon.icoû™ qt	tû‡ û™ û™û™q3 k­‘:ûA	û:AE¯"fş F	F6öûûş Ö »Ö ¦ÿ Ö»¦ô 5ô	h ô ô )ĞĞ Ğproject	K% K½«õ"Ö A"A²² ²Ğ 6 ÿpages/_app+ñ Ğ ˜yÁ/app.js‹ã « 	 ò" ") "Ö fm	m†…fRooutpuQ‚ a a—ña a     	QST	TÓ û‡û‡ = X–=–^^Uerror`š`¡ b!_  ”‹’¥®¥®¥'Åmiddleware.jeCï û/©©ƒ/Bûû*¬'û g ZfÌÂííÖ c_	_òÖcA 5A 72	2Ï 	+ñ A A÷\ Áapp/page.tsx  à±% ¡A-Ö ±û	P"±ûûñèè è%ûš ûš	ìñ 	ûÿ İ 	û Ö 	ûİ 	û       	 
+    ÿFÖ ûÿ û ûûûûûûûûû	û
+ûûûûûš ûš Ö «í «h	h	 h	óaarch64-unknown-linux-gnup	qCNtNg]ÏñLLû«û« û«
+8 ~a.js•ò.nodeÖ XÖ V3	3;ÿ$ ÖXV
+? 578	7I 	8j > >  children __PAGE__Q* b /F 6 h
+ŠÀÂ >
+m Rdist/$Ã/components/±r/global³C.js ë ½É Ïforbidden.jsŒ¤ÄunauthorizedÆ ‰Ÿ’not-foundOEñ? ?6> >?5B[×
+[<
+íˆC‹VVÖ Ñ×	*Ñ õÖ ÛÖ ÇÛÇ1   5> '  
+_­    v1 1/1 ƒ‡‰ ‰zz'Ô ‹
+ACõEõ5 o´¾eİ íí‘<ûC	û<Cqİ ¦B°m°d 8src!I± )§m·AH	Aİ 	HY ' 
+??Ö ¹‹7$	$Öú¹¦û°û° û° next I  Â&Âkñ&	€û¢ •€“û¢ ; … û”û¢	qû¢ û¢ û¢nexty ÿrûQ  ;”Ö ·Å  ·¦CóÛóÛ
+)	¡ñ ¦ñ Çñ	Zñ ñ¥ Ijsx  >jsã Mjsx&  &js«»
+ Djsx	 9js— Hjsx  Ujs¤ Ó‘û	ûÓÓòI 6I	.A I I¢
+<)
+*.6É·×a Ö ¯ 
+P
+ò	¯¦)-5	5D 2 2/<—‡ ‡/%( ·/routeˆ zˆŸ22 Nù
+û² qw	wÜ û² û² .ïXĞ ŒİsT~û²qK××ÇÖ ¿§ 5¿¦s‘=ûD	û=sDsó3!ûûû û!û&û'û-û.û/û0û1û2	 	ûûG 	û   ! & ' - . / 0 1 2 ñ
+
+
+
+ûX ûX ûX½AYYÛg‘û	û”ö’êöí ‡ä·Eİ ÷	  s}~	sû™ 	}û² 	~İ|¬·_€<•õ515
+5;1¯Å‘\İ 	]Ö 	^¬ òcİ 	hİ 	iÖ 	pû² û› û›´XĞ ‘bró û›û› ••+¥	×0§+
+—÷§¦	  Ğ û ûĞO ûĞ÷ û û   û û û İ egl	gİ 	lÚgl}e8‘;ûB	û;8B8¾¾Ä ;	Uproxy¬Ñ
+İ @İ XB%Ê	%6 ˜	‹ š@XåAÖ ô¦ÃôíÖ uÖ ~²Ö ÖÖu~¤ —B´	Bİ 	´n ¤ /x Ç¦ñ íñ ûş ¾/  Njsx(  /jsÑ ?jsx‡ EjsëÈ‘?ûF	û?ÈFÈ
+^¢Ö ÊÖ ÇÊ»QÇÑêŒê?	ò1/û²²á	Qû PÖ µ
+pô9µ¦"Ü %Ü KÜ [Ü ‘Ü °Ü ²Ü ´Ü ¶Ü ÀÜ ÂÜ ÄÜ ÆÜ ÷Ü ùÜ ûû Ü ûı Äó_applib%K[‘°²´¶ÀÂÄÆ÷ùûû ûı Ò zÒÒ Ò û(,{
+  "name": "next",
+  "version": "16.1.1",
+  "dx( òThe React Framework? 1mai< .Ûrì".jïgò "license": "MIT7 !reó$Qory":„ :cel6 !bu"ªJê://github.com// c/issuel qhomepagm : ¢nextjs.org| ì A": "­.C.d.t= 1fil C[
+  •c2 „uĞ  7 ‡  "babel   " ó#  	$ Eompar Xcache1  
+0 xnstants&  * Zdocum€  	( gynamicP  & ª  " dfuture  dlegacy gscriptc  @ F$ Jerved Ghead"  D "imFx  " GlinkB    Gform     r"  $ 8jesì    'og@ &ogØ  "root-paramâ J Ö	@  
+ï" u; ¡?ileX -\ : QnavigÌ$  	b  ( ş/ 	/ &fo€# İ  hheader & =  4	bÉ  D z/testing/É& 	N 
+Vmode/b6S + X O/msw\ / ` :	C³ & N 
+Ÿ!"b^{‘µl1bin3u"
+  },
+Ks‹irdev": "56ƒenv NEXTP¢ô_NO_MANGLE=1 taskrŸ ‘build": "  ôF 1preË QshOnl¿òcd ../../ && turbo run G ,¼ 1T Ssc --¸3 ts[!- `‘ --declarF† --emitD qOnly --f'ŠInternal4 uDir disK| w ¥ec --noEmi# 4nccKú 4nccö õstorybook": "BROWSER=none  Ä dev -p 60067 × •N= 0  * Jtest)  æ–äarequir]¹÷  "./taskfile-webpacé
+ 6nccğ
+ /sw qwatch.j©5  ]› ¡dependenci ¸('1/enŒº$ö R@swc/Q(´s": "0.5.15 ubaselinÖ-Ş2¤": "^2.8.3* Ácaniuse-lite ò=4579% ©#’": "8.4.3ë	ö  "styled-jsx": "5.1.6U_peerDØ Topent"C/api{ 41.0t @´" 5i
+>	²%T": "*K Areac ò^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^  	B B-dom† F $"saDo^1.3.0)FMeta§
+æ *2  "L*‘al": true=İy , œ: ²8 ş¼ ./yd0.34.4•ûswc-darwin-arm64( x& ˆ/O-gnuQ 	+ Omusl, xU x4S 	Rwin32÷ _-msvc, V 
+* †?dev@ƒƒ/code-fr	e7.26.2Œ# rF 1Ì Ü's-parser' %4.óg â>" 7‡" /fcsyntax7k- Ù, ¨a-impor4 , ‘-attribut á à 
+˜ U7.25.J– 
+g1 å;[ ô transform-classÅ55: k : !ex“m‚namespac%B?? smodules/Rj}S
+ä y Ènumeric-sepaáu é,rëApreal± oruntim—/#t-gÌ Eereset-I% ñ % ÎÁ
+“   2–!  %ypˆ
+ Qse-ui’	""´ —8‹7·ñcapsizecss/metricĞ73.4u{¬S/cooko?6.0& 1pon\I_": "4' ¸Av 
+P Rhapi/åg\0· Ujest/Z‡": "29.5 ! & QmodelE7Ñxtprotocol/sd¢
+1$I amswjs/p3Tceptom	'23m Ânapi-rs/trip	H"1.2! Aext/Š<^' /no) õ‘-refresh-¹KT /sw7"|O 	 
+Ÿ	u@rspackU1.6.7? Î²/addon-a11ya
+e & ‚essentiaĞ , ¶V6¶. ï5<Siler-3À‘ _blockY 
+†Ô 	! i5* 	Ä óBrunnY0xGl'wc†F11.2`6swc)70.1£0a/clear>	Ÿ $es\
+½/¼,__90ô) ?%0.ÍŠ4M 		M è[8
+
+' 
+l0 sypes/byô'3.| qci-info‚	(d ƒcompress\0.0.3ü ‰
+Î;d5ë
+O + 1typĞ61.1Ê’ ¡B 3 Gse _J¹1…!exĞ - ÏK-·f4.17.3P „ 5” Bglob¡\t8A": "²Ô@ Bloda^ 4.14.198! Q.curr_=4.1~
+ÇAêVk `í\/ƒA 3¾î^ L9.0.©  c~I" isÉÅ¢ Bsemv [7.3.1
+1sen6	>0.1Ğh¯1Á Ç6Ç -.7e t+6; ‚text-tabß=0.2= #ua-W
+>0.7/¨‘-sources1•3pm:ÿ /@0Š  wCÅ$ciß fÁ80.2ù  vroutingm«\` å’pack-ecmaÂ-
+´191‹ #an;61.4V%ar±µ Basseãç8‰ aasync-=Ä2$ MsemaøFaxe-ñ¢éñCW 0 ÃÆbcompil- , -Ûõ-3fde738-2025091,	J  
+-±D– . ‚ vremove-Ë9£4Aqify-zli¨÷OL  2sli4¨R 2uffá 5ÓQbusbo‹	O	f_swatson/ õ#f43f6a1cefff47fb361c88cf4b943fdbcaafe54ƒcli-sele‚&.1NR#-o•60.0š^CÖ2¢comment-js±3ù61.7NDconfÓ  €-V#if%
+%  + -$0{ 4æ WBÅéKHä [rypto° 73.1ú7css7vtss.escaÊ5 sssnano-Qadefaul{	<	H{·û	Ì zC0 TomainÑ R9Ò	 = š<‚ rfind-up/ Ÿ	G+gzip-sizó5…	-\Ÿ	» B-age!5–æí n! ½#
+C 1Hicssñà gignoreı0sTÔ ePrQipaddW: "2.Mris-dockš	Õ6vĞ1 Ajestòé3 7eÈK3 >t	
+gloaderg4È© m2– (@2‹ 3/ 3Ş
+é	
+È	ˆómini-css-extract.Ş 4ÿ2msw ¡?Q¸51.3‹‘native-urÕ0Ğ	Aneo-,M 6½—node-htmlå5+
+!or\4
+o†0Wap-limişı@(Rp-queÅ'6.ŠÍ
+D,  ´Lë		æ
+	áòpostcss-flexbugs-fix6	œ' ¡“GÖ	R0 ˆlocal-by÷41 AscopW 
+ò~ 	M k67.4# 4saf­H6™$ %csd T ƒ 
+Ö Broce= }épdmöRqueryær"-eD	V‚raw-body9 ï	2fre<0µBrecaÑè1;%re}´
+70.1'sèk#ng\2ÿ)sa716.ñG
+J (@2{ / 	
+&2g8f64 Orver:	QsetimàO.â Dº7pÙ1-ma50_ Y	Õ" $08U D@0.8¸˜stacktracŞ(0.ƒõ‘Î
+[\À
+o" 1httĞ 	Eòstrict-event-emitt\0+âhè	ôşb_decod; [“ë A-ans`	²HstylŸ4”superstru.0Ÿâ$15	Ê1=$teé75.2Q ø­65.3Õ0Ø ktimersvU2.0.1Ï;tty  	Ø14cri]9†ş ê 1uni*p1U3uti*1š+vm† 1	”watchpack£â A%:
+-âq 9¬  (@1Ş @ (@3&	wå8 !zo]e3.25.7!‘zod-valid“#-ñ(: vkeywordŠ"£^f:+Ğ$$js 4web ‘ 5nodL)…front-enX$Gback 4cli7 ÑªQenginêÏ#"nc>=20.9Ê ÷
+} u	–ûœ 	—û› –—q”İ Çâ	â;-_67-Û8²£.²) º £. 1jsx< ü¦û±û± û± h25].js  -on ¯>™ ¶™ ¶™ ™ ˜ “Ï /Ï .ê>cÏ Ï Õb©.css Ğ G 3app)ñs.css
+layout.tsx- 
+
+#AMA* C7ÍE+ ‚ " ñÏ/.İ IBKK
+i 	…G¡İIB÷6 ÷6  ö &0Û;7F 5OB2F Fj@¸ 
+  F-F5røÖ íø‘I·ÇÑÖ	Ñİ 	ÖÇ o;”bÇÔ	Ô†1O0ÙO0ñÙÇ    " /_ óš² ’± Ö @Ö ?<+JA@?õ4Ÿ2ï	®*;)2p b/_app "˜l !  1Ñèà èà ü9B İ~7šûÿ Ö ûş 51ûÿ ûş ¢ '¢ ¢ ñ' Ó	RÒ Ó PP‹’	’±l9 9H7É	É¢ *;px İÇ  Š?ñwD (EJ>D	.A 	6? 	/F 	8j 	,ô 	P E EĞ frontend/src/app/layout.tsxJ J > >  children /_not-foundchildren __PAGE__ Y ñ$½node_modules/.pnpm/next@16.1.1_@babel+core@7.28.5_ ò-plugin-react-compiler@1.0.0_ ¢dom@19.2.3  	 /€ õnext/dist/client/components/builtin/Õ L.js  </F  ï H	+ £Áforbidden.jsé ÀXØ‘ÄunauthorizedÆ ½Æ ù/F D D   6> 5J  favicon.ico  Ğ ø3 E %
+_t 8  B 5k ñ68($E	EÖ İ İ] ] ÷Ò İİ Bİ Mİ \İ İ §İ ©İ «İ ­İ ·İ ¹İ »İ ½İ îİ ğİ òİ ôBM\§©«­·¹»½îğòôïï ï!NextFeatureTelemetry_category_tbdÖ ÅÖ ¦&	&Ü Ö Ö ÖÅ¦	uû tûG û%û*	û%ï 	û*ûF ûGC]	Cİ 	]õ õ 	z÷Vİ cİ —Vc—İ ¦BÆ	Bİ 	Æ;F ôsrc/proxy.js İ¦6 Â6 Â6 | 6 x7 ÿf f	h f f@mui/icons-material  ò/{{member}}  lodash 	 ñûF ûûF	® ÷!FskipProxyUrlNormalizefalseûÖ ­Ö ¦$	$—ô­¦Ò TÒÒ Ò û®{
+  "name": "ô ò",
+  "version": "0.2.0 áprivate": true) ñscripts": {
+    "dev": "next dev9 …  "build  ,2 Ustart   6lin   rdocker:H :   ´ -t connor-Õ q ."
+  }² ·dependencie· s@libsqlÑÄ": "^0.15.15Â ¢@radix-ui/Mò) T1.3.2' Aclsx T2.1.1 Qdotenu^17.2.3 árizzle-orm": "™å-beta.6-ea4d66+ 1nexóA  ; Ä	 2-doV  Achar´S"^3.6Şñ  "tailwind-mergh^3.4.0=/vD@< ±css/postcssd4.1.18— a@typesÔ F25.0µ  Ó ^˜7=  Û # $Áautoprefixera e10.4.2  o"kiKo!esq†: "^9.39â -config-–T8.5.6Ä '  
+R Q5.9.3}ñ$
+}
+ QÜ ÓÜ ÖÜ ØÜ ÚÜ äÜ æÜ èÜ êÜ ûÜ û
+  ö!ÜÜ ÜÓÖØÚäæèêûû
+ûû F	F7ÿ=Ö ÌÖ ÇÌÇ3®® ®EVENT_BUILD_FEATURE_USAGEaarch64-unknown-linux-gnu®9 ÕO ®5 ÿskipTrailingSlashRedirect ®9 ÿpersistentCaching ®1 	ÿmodularizeImports®1 	ÿtranspilePackages ®1 ÿ 
+turbotrace ®* ßswcRelay ®( µswcStyledCO ®	3 [ ñactRemoveProperti½ 
+8 8 ÿ moveConsole ®0 ñ.
+swcEmotion 	ô 	ô 	ô 	f 	ñ 	a ® û®û ñ® û®û$®û% ( q*®û+ ñ,®û:®û;®û<®û=®	û>®
+û?®û@* A* B* C* D* E* F* ñ"G
+
+
+ûûûûûûûû•Ã•
+,	ÿ;Ã¦+ì	× ‹’	’± 
+?ILP	Lûš 	Pû‡ ûœ ûœûœûœ <<¸	á	)  û· 8 ÿ“û·	€û¢ û· û·rûQ 8“İ ¦C¬	Cİ 	¬*	Ãmiddleware.ta	Å!ÅÅ‚Áó@!h h h h h h h h h +h ,h	ï h h9/home/giestas/Projects/Ebot/›Rnext.¾J.ts _Á ‰A      D  
+ "%   5 Â@    1!     @ÿ@ ò	Klucide-reactdate-fns	
+ñ -esramdaantd$ ò-bootstrapahooks@ant-designz
+¤@headless  b-float¸a@hero½ Ÿ/20/solid  4 4 ò4/outline
+@visx/visx@tremorX arxjs+	ì Âuseeffect@ „/schema œplatform m-node browser 4un Gsql y-mssql Vysql2• hql-pg" asqlite†   ?bun/ _wasm/  enative§ 5rpc…rpc-http¸ •typeclassë Åexperimental/TopentÓ$@™-ui/core )‚@tablerl¹’mui-core© ) 9/ai b s *cg 
+- d #fai 9fa6= *fc 
+= g o- )gr )hij 9hi2 *im o. 9io5 *li¸ 9lib? )lu )md p¸ r x- s )sl )tb˜ *tf. tõ *vsP%wi	ñ åò.û€ûîû<û8û°û€û û  0@`€û û€/_next/image    û@8  -Hù-src 'none'; frame ò
+sandbox;  tsxtsjsxjs¢_ d1	‘	aform“F°ÂpreventFullí	
+£DefaultCon#Ä	^ ÇQ "±	.next/dev
+ 2 ~i[¿     !ò—!  »R  Lí@ b@  2 N@¼ö Ö ûÖ ûş Ô	Ô÷ûûş İ ÇÑÓ	Ñİ 	ÓJsrc8)Ç ÚQCñOñ= Gainstru¹btion.jG óİ íí   û	 Ü jÜ pï1 Sñ.modules.yaml  ó"-workspace-state-v1.json .binconcurrentlyjpÑ/ÑÑnÓ²/JJ J |	*
+œ÷Ö ğÖ íğíÒ	ÒCsrcöñĞİ Õİ ×İ Ùİ ãİ åİ çİ éİ ûİ û	  ó
+ĞÕ×Ùãåçéûû	Ê´Ü ^Ü d3ô
+typescriptclsxµ"¨#5'W4@/ CcssÖEdomêa6 Îormreact]%	z'[ ˆnextó"@ #ƒ"zÂ^dï ï»2ï ïf$ÎÚÎÚ~Î†js İÇ‚8‰‚ÿï û0ï	®	ï ï.Cû0S2SS&J!2` ` ` 6jjJBB†AÖ ú?úíG÷\d`ea	\İ 	dÖ 	`Ù 	eİ 	aC‘º~y  Fnextdj—V—AÖ ĞÃĞÇEE E Ç'ÇÇzÎ&'G ÉñH #%	#Ö 	%Ö H H¸ ¸ bbH¼ñ<€8+,*(İÅwû	û—bÛİOÖ û # ß×× ×Ğ á~"/puÎ_Ö ³{ ¡³¦û² V ñ—k	kÜ û² û² û²V—/4)‹º·ºL”b­cQÇÑØYØ3 Y4!Ç‹7à	à, V # ö@H	@İ 	HÖ =
+ââó MÖ LÖ QMLQœ0œ	œñ£0ºZÖ 4ÒÖ eo	o rÖeÀ!ªªo
+	ñ*  û û      ñ&(Š›œŸ¡¢¤¦Çëíûş 	 	(2 	Š2 	ÇI÷ûş ûš  //page‡ ‡/ñ( Æ/routeˆ /Ñ7 L ÿ‰ ‰       £  û.Á1 	õ“ L' •O1 1¹ QÑû
+™7û
+o^src/x		s1s
+ss,k÷1İ fhj	hİ 	j“ c ÿ
+f	j 6j 5;…	…û· j jyƒrj65ä7Í	Íâ @ÇF-FF/@Ÿ-j ’”	”f’Ö Cn?C)‰Û.÷.   " 
+/_document õ™² ’±  	Jİ 	KÖ JK=À¤ò%	Bòí Â7Ş	ŞÂ	üô	Ç× × ‹× ¤× ë	)  64Á×‹¤ë# # W¨
+Š/dev×’AÖ ç÷$çÇ"	× 	"H  '  
+Ö `Ö cÖ b	b¸a`cÍ	Á	q~~E	ÜÖ²"	éaóÏ	çİ 	ÖÖ 	åİ 	Ğİ 	ãİ 	Îİ 	áİ 	Ìİ 	ßİ 	Êİ 	İİ 	Èİ 	Ûİ 	Ùİ 	×İ 	Õİ 	êÖ 	èÖ 	ÓÖ 	¥ñ 	æÖ 	äÖ 	ÏÖ 	âÖ 	ÍÖ 	àÖ 	ËÖ 	ŞÖ 	ÉÖ ûšûš ûš ÈÉÊËÌÍÎÏĞÓÕÖ×ØÙÚÛÜİŞßàáâãäåæçèéêûš ²² ²Ğ fronte\sÔ2+ñ%#!&nx….js‹ã 	‰
+ M7Ï	ÏMtW
+i	i$ ò g¹cgV—ëwû 	û = á¨ñ ûş <*< <w‘* *nextğ$yÜ‚ûj{
+  "û{€ öwebpack": null,
+  "rB": {Œõ
+ignoreBuildErrors": falseÉ ¥typedRoute N µdistDir": "9" ecleanD Å!aassetP7C": "- òacheMaxMemorySize": 52428800O ¡onfigOrigi*"#YF õuseFileSystemPublic³ € rgeneratî &Id, IEtag2 òpageExtensions": [61tsxx 3  "‚ F  "j qjs"
+  ]¿ ø poweredByHeader_ acompre£¥ Aimagj¡‘deviceSiz € A  64e    75 2828¹"U  108 "12J %92 52040 A3840Ü µ ˆ w $32` : $64 $96
+ 1‰ %25 9384c ˆpath": "¬W#lo-""d
+ 1Fil9" Rdomai¢Á ädisableStaticIVÜ§ ô"minimumCacheTTL": 144+v"formatõi/webp"É tmaximum Ss": 3d ôdangerouslyAllowLocalIPf& ;SVG" c™ÿtSecurityPolicy": "Ò"p N áDispositionTypQ¤attachment, ²localPatteraû  ADpathá%#**9  Qsearcå21  }? ¥hremote^  yqualitiö)75= ´unoptimized.¶¢devIndicatÔNï õ": "bottom-left"8 ÂonDemandEntr} : õmaxInactiveAge": 600,ñ pagesBufferLeng×5T SbasePìƒ"sassOptU²td"Ñ CHi18nÉ²productionBušSourceMap£sexcludeTaMomentV˜ereactPT ™Profiling„ % ¨StrictMode  2Maxás6!§"httpAgentô Ê£"keepAlive4Bloggƒ acompil@ expireTixE3153p sôRPageGó¡ionTimeout¹Um#»  ©å/":, ‚)ö’2  "µK  > ñoutputFileTracingRoo;&— wÑcacheComponenñ ˆELifeŸ zZble": 3Ú rrevalid²)9 ¡Â": 429496729 }†usecondsq 	` $ _ 1 ] 6¸U 3min«¹	U û
+µ , W :360Y Ohour¬ W /36;864Z ?dayY C 
++48[ Oweek\ E ] [25920^ ?max½D ] ¾ğ°bHandle{å"o € è"useSkewCookie»²  "cssChunkÕùô  "multiZoneDrafÙÑ  "appNavFailˆ A ! óprerenderEarlyExitËæ á"serverMinificŠ
+  ÃlinkNoTouchS¢,_ ÕcaseSensitiveÓ
+" ÁdynamicOnHov dpreloaÎ$Onc ‹,[ QrFiltD   
+ )	m  "fetchN	;Keyè1  "º1Pre' Á": "flexibleñ  "optimisticClientK 
+.bmanual BWó 8cpu	mXûBasedWorkersCount!timgOptC‹[	8ù	CgOptC5InS¹7æ! ùMaxInputPixels": 268402689' ïSequentialReadj ËSkipMetadata  ÚsrFlushToDiskwà QThreaV\1zeCn QnextSE
+ ÄscrollRestorÀ@ ‚external ‚O×~zedLoadACgzip÷v|raCompa©CesmEq sş ÆfullySpecifi
+yswcTraceÜí1ceS% ÛÜò largePageDataBy3128ã^!dEƒ‘parallelSCÆ^ 
+% QBuild¯ ( +pr²authInterru 1| [‡ÃX ¥ ZReact]qviewTraˆÂg ñremoveUncaughtErrorAndReje¤
+L-Â7 6îRSCRequestHead( Astalç		É÷6": mø	Ÿ
+mÿûreactDebugChannelF¥	?Hmr} _ S
+:Max2N) ¢inPagesPerdS": 25œ tW± _inlinº 4use¦ XÕglobalNotFounn b1ÁInfoInTerminJF NlockÄá  "isolatedDev©
+)å dMaxBodÓd104857j	ı"hideLogsAfterAboù2mcp
+` –turbopackïoForDev, º ò [ aInferMÊ#QSideE'*3P±/£"€+ã4  "‰+ '-e Vramda Fantd Í­+ WahookF ¿++ È+ Ñ+	! Ú+# 	4# ì+H õ+ ş+ 8rxjû Dmui/s*% ”'  ±4+j$us¢A  "e5 @ =, F, É+ ²" 	.un ?sql s, _ysql2 /pg ,! 
+¥ A OwasmA 
+÷Wnativ€>rpc> », Ä, Í, Topent©: lß, * ñ, ú, D ?/ai b ØH cØ` cH d f°H ?fa6© f±	1 a g o` /gr hH 'hiú‘ /imI iy ?io51 /li$?lib2 u mÍpÜ r ÇíH s0 sT#tÀ /tfI t /vs"wiK]ÑhtmlLimitedBozò"[\\w-]+-Google| - ñw|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot ô
+Preview|applebot|facebookL&hi ô5catalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriq aYeti|grweblighça"bundlàs
+;(	"y€y5ØM N?İj:rã	²	rIdæ
+LÍŸ ÑexportPathMap/ò9
+}9USERgiestas
+SSH_CLIENT'fe80::8165:2178:2248:c6ed%eth0 59949 22npm_Fúj_user_agent,pnpm/10.26.2 npm/? node/v20.11.1 linux arm64
+TEXTDOMAINpam_chksshpwdXDG_SESSION_TYPEttynpm_node_execpath<0Ñ.local/share/ˆ a.tools D-exe˜  ùSHLVL1
+MOTD_SHOWNpamHOME‰OLDPWD ó/ProjectsSSH_TTY
+/dev/pts/0npm_V)o_json7; p78 )UDBUS	ô/BUS_ADDRESSunix:path=/run/user/1000/busFORCE_COLOR2LOGNAMEë'"p¹òverify_deps_before_run$:_$· `Xpnpm¬·CLASSuserf ôregistryhttps:// ø.npmjs.org/TERMxterm-256color[ ÊID4PATHû©˜ ŠOQnode_$ñes/.bin:/snapshot/dist/node-gyp- 9P  4 !„ J©¤    Cusr/ß  s
+ 	   - Rgames  _NODE§*	LTnameŠúXDG_RUNTIME_DIR
+òLANGen_GB.UTF-8	LSñSûrrs=0:di=01;34:ln	 ñ6:mh=00:pi=40;33:so 45:d	 "bd W;01:c !or ñ1;01:mi=00:su=37;41:sg=30;43:ca=00:tw Ñ2:ow=34;42:st* A4:exo a2:*.7z v1:*.ace l &pk 'rc j b/ 5bz2 6cab "piİ †1:*.cratn &de' Edrpm4 'dw c 5ear# 6egg %sd g/ j/ 5lha# &lr$ ğ 6lz4# 'zh m< zÍ &pyH rl Ê k s# sá tŒt$ &ta_ titjtğ tÍ 'tx=  ¿ Etzstå uŒw† 5whl% &wi—` _ 5zip- &zok j Aavif% b5:*.jpÆ e xw X5:*.m& m' gL "bm} b5:*.pbª  g eb5:*.tg×W5:*.x0 x$ ` 6tif¹ &pn¬ )sv ¹ % "pc} %ovmm'm2% k 'we¬ 6webõ oé "mpÍo 4> 'mp "vo€R5:*.qf5:*.nu0 &wm &as rT6rmvG "fl)b5:*.av h5:*.fl T gçd &xcj "xwİW5:*.yš cî &em0 &og^ &oguåaac=00;36:*.au 'fl 5m4a 8mid i k% &p3 pa 5ogg r/ 5wav &og Eopus 5spx Dxspf ¤~=00;90:*#	 E.bak ‘crdownloa· å90:*.dpkg-dist%  :new +ol4 5tmp"  1oriØ ^ 6parY 5rej2 8rpmc 9rpm8 urpmsave/ &swm y :ucf½ Hucf-Y Fucf- ñnpm_lifecycle_s«ùJñSHELL	/bin/bash	NODE_ï	/3ï	
+–	üÏ+m1istÎ › ˆ	¹
+/ Ê x— Æ ¢Á ¨p$ùB #cG ™tly@9.2.1U 	  ğ9X x İ/t o N°#— ƒƒAw0.2.0!™ÿ	B °÷
+eventdevNO_AT_BRIDGE1Bnpm_¶gHw §etc/npmrcV R .h ĞŠ/rcPWD*" cAOnpmL3?¯ONNECTIONCC% ñ	557:d4b8:b6f:ca8%eth0 22/ß ÿ_recursivetruePNPM_SCRIPT_SRC_DIRö [E_jsrÂnpm.jsr.io/- ¢mmand
+run-·	ƒ ZHOMEoãŸINIT_CWD2óôENVdevelopmentNEXTæñnodejs	TURBOPACKauto# ùPRIVATE_WORKER1 ñTRACE_IDe5079805f11201d8u óOPTIONS.--max-old-éBñize=4031 --enable-s£,ù-mapsPORT3000__o ÒORIGINhttp:/X¢host:3000Sõnfig_frozen_lockfile H ±OCESSED_ENVõó.DATABASE_URLfile:../backend/bot.dbRUST_MIN_STACK8388608@V QDEFINbT òprocess.turbopack  Eenv.l  X ´BUNDLER"TI ("( ÒMINIMAL_MODE]  „gENV"û
+D `?"  f X""(^ ¦ óAPP_NAV_FAIL_HANDLING 0  3PPR #  óCACHE_COMPONENTS+ +  2USE/ $ $ × ÓDEPLOYMENT_ID& 6& Ã ñEXPERIMENTAL_STATIC_8v_DEBUGGÑ )>  RFETCHŠ ÿ_KEY_PREFIX""*.  cMANUAL_zCPATH 22  + ÿROUTER_DYNAMIC_STALETIME"0"18 × 7 "300"/9 âFILTER_ENABLED®
+§ S8 ñ ˜{"numItems":2,"errorRate":0.0001,"numBits":39 ñHashes":14,"bitArray":[0,1,0 1
+  
+ 1 ,   _0,1]}Ä DÄ LÄ 0Ä 0Ã InullÅ /]}<ôVALIDATE_RSC_REQUEST_HEADER	4tON_HOVE_~¤OPTIMISTIC‚B¸& ¡MIDDLEWAREØfETCH
+š+3  SCROSS«$ ! §"@ÏHTESTÊ: ©ºDIST_DIR6" 	/²_/dev"x ƒáâCASE_SENSITIVEˆ¥ ÂREWRITES0{"üâFiles":[],"aft6 Qfallbˆ9O[]}!ó  ÔTRAILING_SLAS' )  ÒDEV_INDICATORgã	' ¹_POSITIONï4	K%YSTRIC¢"è¢& B_APPˆ &ŠTZE_CSMÿ 	~) %y ÑCROLL_RESTORAÔ -  ú IMAGE_OPTSû{E9Ñ[640,750,828,(9¡1200,1920,9ñ 3840],"imageSizÛø
+32,48,64,96,128,256,384],©6q[75],"pë5Ö8Ñ8Ğ88ö7j
+Ü6 cdomainY:7<[],«7![{Œ µname":"**",7_""}]}àşR¸·?""Ş6HASˆ ˆ ïCONFIG_OUTPUT I ÃI18N_SUPPORT$' òS' ÄN u _"".“  (NOôïURL_NORMALIZE »ˆEXTERNAL6 ƒ_RESOLVE‘ =	
+å/ -˜  ÷HAS_WEB_VITALS_ATTRIBUèí1 
+ïÿLINK_NO_TOUCH_STAv
+QASSETğ/¸  	\	ÕAUTH_INTERRUPİ	%7  ÒTELEMETRY_DISzGFéULTI_ZONE_DRAF¥$] Ñ%HO^¢x¥ALLOWED_RE’O[]1^  rBROWSER<
+ñ_INFO_IN_TERMINAL"¯"˜“MCP_SERVEÁQÏ_HAS_PERSISTÈSREACT“ sCHANNELõ 'Ã  BTRANS€FöòEdgeRuntime"edge-r %"d 3mitx &§İ *ÿÿÿÿRp³+²EDGE_PROJEC3?""L ÿÿÿÿÿÿ¡¶s.GENTLYKA	xş- A{ŸARELAkï&"Ä°2 ñŸßCŸo§""Ÿqÿÿÿÿ|Iÿÿÿÿÿÿÿ×ø! ,sxDv/x52vr7zDAAKyJ8OdaTRXZ90VqPXMUUYC1W8++o=])ó¤ 111f97b141f6ae885a5f6da556f541df@008ad8d0d3bc00ac592c305812a10ed3e7faf41cf0c6b7a73a89f0e2d5cc8290@8e1287225b0149773701da927d037b9eef03e46c68207f6d3fe42664e2fa006f.chrome 111, edg
+ rfirefox ø+safari 16.4  24.12.0< 1   6> '    <1 1Úd
+_`	_Ü«iñû² û²nextĞ frÏXd/ñ nextû²û² V —a]ö=Vq	=ûœ 	Vû› ;Ö ½Ö ¦|jñ  Ö½¦
+ûš = –8_õMN	Mİ 	NÖ ûš ûš Ğ ‹ @>ñ =–İ ûş Ñû	Ñİ 	ûÖ İ İ; Âd3dËûş Ö Ö   ñİB§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆ	´Ö 	Ãİ 	²Ö 	Áİ 	°Ö 	¿İ 	®Ö 	½İ 	¬Ö 	»İ 	ªÖ 	¹İ 	¨Ö 	·İ 	µİ 	³İ 	±İ 	¯İ 	ÆÖ 	­İ 	ÄÖ 	«İ 	ÂÖ 	©İ 	ÀÖ 	§İ 	¥ñ 	¾Ö 	¼Ö 	ºÖ 	¸Ö 	¶Ö 	Åİ û¬û¬ û¬  .js.json.node(8 b/ş node require main tindex  ñ vx	vÖ û û xÒ ûû yt./(CïCiï³î™_²İ ííNR+g Rg >SP c–ãÖ ÇãÇ]dú‡û	 Ù ^Ù ca	aÖ Ù Ù —../..WaqúÙ^cû°û° û° .)ƒ  Ü nú}ì5nœƒñ>ûE	û>ï 	ûEûF ûGC­­­SpagesŸÖ ©ú Á©¦Ö ûÖºöe!û˜ŸûR ûRVløğûRuyz	zÓ û‡û‡ ss  ÄR H  òÿÿÿÿÿ,   (   <   P   d   x   Œ       ´   È   Ü   ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü  	  	$  	8  	L  	`  	t  	ˆ  	œ  	°  	Ä  	Ø  	ì  
+   
+  
+(  
+<  
+P  
+d  
+x  
+Œ  
+   
+´  
+È  
+Ü  
+ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ 'u.ÊS{F§      8     [6ûcƒİÏ<â   8 y)|³1¸B â‹   S §¥ cñÓ â   Ş\ÂüÙV âú   ñM%Íªö§\Â â  ëşpƒ„İx~ â¿  ½nğv â  ÅG¤è¸¬ã å.  ÔcÀq·ëå ±"PËdF ñ   0b‰E /]i ò  !  B/^Ø%5[ â  c8K<<	b ñ –  ~[j“hº,İ á#  ½tá:k²› ò    7Õ¼–™‰ø âA  D /~¢‘"í âs  …L÷mJŠ]Û â$  ø”„®¸6:© â8  ùqÓrîo’3 âL  T®UÇ².$j#Œ á*   G(x9á’¤w( ñ µ  Ê_ôúe9o’ ò    	p2r-İ†Ã â6  	’ômÀ=x¸×P â  	Èõ(é£Mj( â  	áïşÿ	çÃ(( â?  	öO[z¡3Y2 â6  
+5h}ˆÄVâ< â  
+k/VfM3®& â3  
+†Àìx0¢eæê â  
+¹BDÅõF9Ùr â³  
+Ôcíü¬6ü âD  ‡Åã:851 â  ËÏ]ù\gÙÂ â)  Øw´ªŸNK æ  ¡cÃSFØï ¢ğ´£x2YÈ â5  7xCß×ÀÜƒ( â3  l®$›èÙ½W â  Ÿ ŞÌHÁ‘é â  ³"+¼ÂûÄ0‹ â6  Æ"ÍB‹Ê@Å%d â0  ü#l!¦yccÿ–( â'  ,#µ¼6Ài]  ( â$  S&<˜Òã à( â  w&ëJh`¹„ì$( â0  ’'òFÙ,z( â  Â'B§ıNf
+( â*  Ğ'Mêk%F Ú â  ú'Z}n¼}bÊ< á)  'zó`ÎÜ² ò ]  <'}B²õx!,<< á0  kL'½Á£oJeŞ( ò    k|(cÊ·fÿO! â  k—(oÒÜi”&< â$  k¤,â&‡mŠk9 â*  kÈ,ıO1‡˜0>< â  kò-ŠÔÚL§oæ â  l.È”åİ|©# â  l#1ëu¦Xeäa’ âI  l85™vÑûík+ â7  l7
+";9ØŒ â  l¸8"C(‘†ÉÙ â  lÅ8B,´*Ç×OÉ á  lá8bcapÉ÷m ñ Bí  lü9Dx¿R‹Y	 ò    ¯é; ¶-=<.Ä» â2  ¯ê<~Ì1İÄ,ğ â6  °<ğg¦´•g†) â*  °R> HëoÉ9Te< â³  °|>ì6²©Z²ı â  ±/?‹-¢^W< á@  ±N?ıû;}Püñ$( ò &  ±B--Ck2( â$  ²´C1ÆuŞæ'; á0  ²ØCX8arÜ§Ö< ò    ³C{h©|¯Ø›¿ â7  ³#DeÑC¥vÒ³] â!  ³ZEÂçƒ3P â*  ³{F°^}'UÉ·( â3  ³¥G¹¨÷í† â  ³ØH%‹@=$¯és ñ   ³ìHkï’ÈŠF 8 â*  ´HçQ…ù}' â$  ´5I’GéT¢ÿï á#  ´YIÑš>ÙóC¼; ò    ´|IÒä•b>, â  ´—Iÿ;«G âB  ´ªKLLÇæÜ‡% â  ´ìK_l¿oó˜ âÔ  µLLëÄÏNr â  µÛM;½E|eyl â  µçNH×c‡ï â2  µüNP\h^ø4 â  ¶.PÆy	ßÙP â   ¶EPq×´¸bsÅš âÜ  ¶eQaQ…sÉŸ â	  ·AQ³”­ú)¨­ â7  ·JR9|j‡²=â0  ·R[£eıq_ú( âD  ·±R´H>qÂBd â  ·õS6V »z[ó. âm  ¸
+Tõşv¼É² â  ¸wWDÀV–jçt â  ¸’W|6}Îcì© â  ¸¥WõN51¡Nş â¼  ¸­Y!¤)B¬ â  ¹i[Gñ‡œÃ”ß´ â>  ¹„[¯ìNˆI%ˆM( ñ 6  ¹Â[ÅiŒ³2R„U  á4  ¹ø\‚T°9.MY ñ    º,\¡zEü¥6 ñ ·  ºG]MVµ0Á³—Z ò  :  ½ş]e	[*-» Ò â  ¾8]ßÈ	v…Ü â  ¾M_-ÍÎ‰‰ â`  ¾h_]"šd´ â?  ¾È_…a!¤Ÿô( â<  ¿`ŸLkO.( æ$  ¿C`¾©!Ôºw¯( ¢g`üÚê4ÈVP' â!  ¿£a=î€œµT@ â>  ¿Äan>Xƒ"Bêº â  Àa®÷¾‘X£89 â&  Àc“¦\TÕg+x â0  ÀCd×Hüò]”( â  Àse3Ÿá%€ âG  À€eÏ7‡¡À1ç¸ â  ÀÇfòqÓRÅıeò â<  ÀâgJn)Ï  ¥ â÷  Áhô–V ‰‚ â  Âk#Ç_Æ`ìŒ â$  Âkñ«‹çG7( âc  Â:l† STvôuO â*  Âlì<£”i° â  ÂÇm“ßæ´ÈÅ( âw  ÂâmÃTYnÆK¦d â*  ÃYpÛvœ©¤a}( âĞ  ÃƒqBL‹`ıIªØ æ  ÄSr¦Œ0æIlÀ ¢nr¯ßÇäĞ•g/P â$  Ä‰sCDñ@Ê%k( â´  Ä­s€ë…‘_;,X å>  ÅatHˆ8ÚÍÊp< ²ÅŸtQßÆSİ
+÷( â  ÅÃuEÍÅVh.( â  ÅŞwç·fpÍD( â  Å÷xRâ¼Á5(q âH  Æz<\—ÉÂ/4< â*  ÆN{#ôÁÂ? â0  Æx{7^X\zúÉ—< ââ  Æ¨{i(ıSÎˆ«¤ â  ÇŠ{åtôlC£¨ â  Ç™|xe ­Ìf âƒ  Ç´|ÇÚÇÜ½¶f â   È7}××ğ-x â$  È×~º”¾‚½( â2  Èûô}¹h˜–A â7  É-u}4^¡Íß  â  ÉdƒIq|?iN õ æ  Éiƒqÿß£v ¢„ƒí-)¶Ÿ;Á³ â;  ÉŸ„·qê—>Jì åÅ  ÉÚ†!e	51  ²ÊŸ‡Ëkj3ê"Ë( â  ÊÃˆOÍêÂËß9é â-  ÊŞŠ#ˆ¹¢[ÏÔ< â#  ËŠ8§×3S( â	  Ë.ŒptÕ¬.¿®¶ â  Ë7ŒÏSŸİT,& á|  ËRº\«QMíQx ñ ,<  ËÎui‹U|˜• ò    ø
+Æa$¦/èsá â#  ø´ÃÅcBš± â<  øB¾–etE~‰| â]  ø~‘’.¬e’å7µ â;  øÛ’N
+»¿Acó2 âÌ  ù“/ÚÑ—sŞ<J â:  ùâ“±Êß¹×"÷ö âA  ú”Ú¶vîZ¯/ â=  ú]”óÎÖ{&ù%7â*  úš–T¿Md,òù( â  úÄ—7çd»j˜Õ â3  úß˜˜üâŞĞŞ}Ú â  û™+|Büï#£ Ó%  û-š/øF@EÍPÅâ  ûRšBÄêÚ4ƒg@x â0  ûm›o®ì©ƒ< < â!  û²KS@4 â  û¾S¶ev‡Cç â-  û¿] ¡k"Bï P â#  ûì÷áäEæ: â0  ü! ì·yí{< â  ü?#.^'×T â  ü@D^†=–ÅŠ â  üNSŒØKÃ1
+È ñ)  üg ±|xõrZj5    w    ¡BôÇQniC ñ }  w¡æÇº‹©6b
+â*  ô£œØ2qÂ2[Æ( â  ¤‚ùEû<y â	  9¤Ì—tkÜÇ!< â$  B©ÂÅOq™(\( âB  f©"Íº¡‡Å â6  ¨©ø´‘˜/Á â7  Şªş&ò5‡ âe  «·©*—¨|d â;  z«Î%¯Äâˆü®( á  µ¬>,®T±§ÍR ñ Â  Ğ­iÖq¯$íÔ ò  a  
+’® ’“šz â  
+ó¯‡ƒ;¤0ÖÍ á  
+ô¯Ö­KÔ’˜T ò   ²T`}¯™}Œ á.  ²”¤#|ÎòÄ( ò    J³m'—{Õ§£ë â  e´Øú´tó©ï¡ â  t¶ê«&¨= â+  ¶”‰,Qß\€"d â*  ¬·ÊH›–( â  Ö¸­ú¯¬‡… â+  İ¹ <ßwH!L« â7  ¹á0{€*P á7  ?¹kğ®²¿( ò   v¹m™Î¡( á#  ÷¹’ˆtJ½	Ğ( ò  3  ¹Ókq:€¶ â  M¹ô}J«¢ â  NºSÏ*S8Äğ â=  [»:µ¬|ˆd â  ˜½}ß]ºĞ‚k( â_  ±¿bïĞ£-dD( â9  ¿Ó"—?#1( â	  IÀ™wÎ¤Ø“¾ â  RÀ¨›Œ!ğ©ñ â  YÁŠâ÷2`Ñ âp  tÃÙN]ÊÀ¤_ âì  äÃÔ‹/yÒ¹9 â  ĞÄĞ]JïybÙ â2  èÅHİg®ZV  â  Åñõñx*¯!> æ0  3Æw‘/ÇC1fG ¦cÆ{¿Şh® ¢“È¬´ÑˆsWGd â  ÃÉVY[¾û â  ØÊ0àH‚«ÏÍ5< â*  óËbo¦ÂUAc( âé  ÌCÎÇxCÓ â  Ì¤ú¨bŒ	0 â	  !Ís©êQMÅAP â7  *Í¸5?¸ 6’ â  aÎ.ô'¢U¡Ü"< â0  zÒ·½XáÓG; â  ªÓ~sÀSÃÉ<) â  ·Õ áwşUP â5  ÂÕòºØ— â#  ÷Ö$„ã–6q€„< â«  Ö‹swÛ Lk´ â  ÅÖùëMªäbp â%  à×V×¶/Åñ* â	  ×¡‰üÇóáÑ¹ â3  ×ßŒ_%†× â2  A×ê«:˜³Cß â#  sÚ*KFMd1? â  –Ú£\W{‘H/N â!  ¥Û1ãWÃø3ãEÈ â>  ÆÛ¿ÂLF·ó-‘( â  İıõÖ•iv‰n â  Ş$	¢ â	  4Ş×n¦¶/O£P á0  =ŞáÂ¿êÈ( ñ   mŞéÑ¹5Ìˆ ò  ^   xàX)ï.³{Š	< â@   ÖàÚ~âlî'!
+ â#  !àŞlÊãBşĞF â6  !9á¼ƒ9b¦—gP â3  !oáæªzBğÊ8 âµ  !¢ã|ßÇü—QÌ â(  "Wã­2ƒ[î#BP â0  "åXt1@«û“( â¯  "¯åZ@åú°×E â  #^æ$ÕWÙ< â  #sèägÈ×QC â.  #Œé«Ä,(X9³< â+  #ºêSxßD´­I â  #åë$0G©ÅíVœ â	  #ôì%“R]÷A5ó â  #ıí9(ÎSN–6 â  $îBæm©hœİ â$  $ğ'ºv¿èÏ â3  $=ğSg%t²¦
+ â%  $pğ[tMÄ*è â  $•ğ{şõû‰î± â  $°ñ›UO¢Ì#a â!  $Ïñ˜`RÿúX â²  $ğògËlœ&9õÇ âÜ  %¢òßùz‘E—Q™ âè  &~ó#sW™0Î â(  'fó`N=Fiœ9h â3  'ôSšQúÎÿ Ñ6  'Áô/” ËSQƒò\  '÷ô{Y¿óo K‡( â=  „•ô•g—nÜ ä^ âP  „Òôèm?êØtğ< â  …"õŒä1|¬Nû¾ â  …7õó*fEÙUÃL âF  …Rö#ûºwKXªàâ?  …˜÷EÁßh ( â  …×÷Uô›
+ÏÏœ¦ âÇ  …ò÷†XQµ#§°: âr  †¹÷›yr«Zu â#  ‡+øN à'ÌW- â  ‡NøT{uÊ~	î â=  ‡Uøg‘êÀ¾	9Q â#  ‡’ùR1ñl>’ä â  ‡µúúäO‘ü
+´ â  ‡Ğûø2ğâĞÔ`( â´  ‡éıh^1‚š*{ â"  ˆıÏí*PnçÁH< â  ˆ¿ıİf¸Ùo( â  ˆÀş!Ï¡Mæ10( â$  ˆŞşM[;CO( â/  ‰şº:™¤+Äª â  ‰1şâ×í $Ê< â#  ‰Lÿğy:HİLƒ( ğ
+¸  ‰oÿ–d®èRt       Š'   0    wX  ¯Ö  Êğ  Êø
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000002.sst
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000009.meta
+--------------------------------------------------------------------------------
+şJÚJ                 'u.ÊS{Fÿ–d®èR      Ë     ^  XbûH ĞLÕ•fôØ[ñ©f.´   ĞÄxìû>¬] §–óğã€ÃŠø ˜€Ô 8
+€ì	•H    Í¯‰ä: ¸`§Ï€vŸ<Ş0ïÛ€¼Û<æ1>ˆÌbŞêvm „®      ˆ€®œÜ$:º«Â|ÎnÇ @ì ‘   "u–­ÿYA   ”   t¹`¶”é`f @@Ñ¨ßš'     / [U Lk  ïG     D@p   •`UË|s Àq   –œ‹"åf‹#å¬ v€  æ@Ş¬   €  d    $€æ   ŠI8  H  C€ è æH@P İÒVÅ­VEq—z…ú–lIÀ Éxç.À h†²÷Š_Xg	   8É—*&J“|€ï`l¢Õ‚ê« 9 ï	 8 [âÍÒ¢G¬³bŞ’ƒM¸K-àÀ½p€  ¸pG°¦àò÷€ `„şé+  ğ˜~—     Ö5    @¢c \ <Í`E^"	è\b´  °x À€     @‡—½Ã;£«ú8M*  ˜À  ÌÑK   €ÁIÁ4ğúÕ1v[5ö•:ÂwUö9@)
+   aÀéÁ¡t.B €”%j]ïG±‘%¥œZÃ:     4@	€M:€xP…>ßlûDq	rPot ¥Âbñ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 Âl@ Âq@Âr@:Âg@;
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000009.meta
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/CURRENT
+--------------------------------------------------------------------------------
+   
+
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/CURRENT
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000005.sst
+--------------------------------------------------------------------------------
+   òÿÿ   õ   P   U   µ   n       ²   É   À   /    s   m         Í   N   â   F   Ş   ä   ã   K   í   İ   Á     l   ó      ×   ¤      ]     Ú      ,   0  6  Ë      Å   “   Õ   C   ö   ù   #     R     H  "  ‚   æ   Ù   V   ê   .   G     ¯     +  Â   S      ğ   ±      L   ª   *  h      å   à   ?   B   ˆ      §   B  ’   £        ;  ?  ­   )    <  ¦       z   :   x   8     c      \   Ì   ƒ   ¬   -   Y   ÿ   Ç   1  a   @  <     ¥   «   Œ     ©   2   ú   9   {   b   ¼   &   	   F  i   €     ç   e   !ğÿÿè W          3  •   ş   ü   A      _   é   p   ¸   I   E  M   ¢   "   [   ^     Ä   .    
+  Ğ      …   D     }   Q   7      y   f   †   4   %   >   	    ø   :  Ó   =  Ï      #   ®   ÷   E   ¶   Ò      q         „   /   %  ·     Ñ   ì      6   
+   ‡   w   Ê   @     0   Ø     4  g   °   J      Ö   ë      ò   $   )   —      X   |   (   š   ‹   ß   Ü   >  3   j      Ã   -     Û     u   ¹   Z   O   ´   G      ”   œ   ¨   r   2  H        ¡      ™         ï     ³   ô   '  –   Æ   á   A   '   &  ¾   î   D     C  »   Î   v   5  ~   7  È   *   ‘   ,  t   ‰   o   d   `   ½   ˜   T   û      Ÿ   !     ı      Š      (  ñ   1   8   $  =   ;   ›     k   9  ¿      Ô   è   º   +     5     ?R H  óÿÿÿÿÿS   L   f   €   ³  X  l  ƒ  ·  Ş    %  T  n    µ  É  ï    >  [  }  £  É  û  !  C  r  Š  "  V  n  ˜  °  È  ö  !  K  ‰  ¡  ¹  Ñ  ø    >  _  Š  «  ä    5  M    —  ¯  Ç  	~  	¤  	Î  
+  
+)  
+V  
+n  
+•  
+É  
+á  
+ù  (  B  X    Á  í    C  [  €  ˜  ¾  ß    2    —  Ç  ß    @  X  p  ˆ     Ï  ç    .  T    —  °  k  ƒ  ›  Î  æ    :  ø  '  \  ’  ¾  Ü  ô    ¶  ë    3  b  z  ‘  Á  ê  "  I  p    C  l  „  œ  Á  ä  ş  #  È  à  ı    ;  S  k  ƒ  °  Î      6  h    º  å    '  U  r  “  Å  û  '  U  m  ‘  Á  ì  :  T  l  €  2  L  d  |  –  .  d  ¥  Î  â    =  v    ¹  Ñ  ÷      2   a   š   »   î  !
+  !"  !ã  !û  "  "-  "Z  "r  "  "·  "Ó  "ë  #  #F  #^  #  $/  $V  $Œ  $¤  $¸  $â  %  %%  %P  %„  %¶  %Î  %ù  &  &)  &]  &‚  &˜  &Æ  &Ş  '  'w  '  (u  (‹  (¬  (Î  (æ  )  )>  )V  )„  )œ  )Ç  )é  *  *3  *^  *  *À  *ó  +  +M  +|  +™  +É  ,‚  ,š  ,Ğ  ,ç  -  -+  -C  .7  .[  .s  .  .Ó  /  /5  /i  /  /¢  /Ğ  /ñ  0  0E  0]  0‡  0¼  0Õ  1  1  1F  1l  2#  2;  2ò  3
+  31  3I  3t  3Œ  3¦  3Õ  4q  4¤  4Û  5  5å  5ı  65  6M  6j  6‚  6œ  6Ô  6ì  7  7  74  7i  7}  7¦  7¾  7ç  8  84  8L  8u  8  8¼  9f  9†  9«  9Ö  9î  : rˆáö3÷’ûW*         é‡6Òúüıû Ğ frontend/instrumentation.js4 ó…9&¢£©ûä OûQ  õKz_²û… :û¬ ²÷Ø9É;:pûh h ósrc/middleware.jsM ²"¤Ò€»6û3 ñ$Œnode_modules/.pnpm/next@16.1.1_@babel+core@7.28.5_ ò-plugin-react-compiler@1.0.0_ ¢dom@19.2.3  	 /€ ¥ Ó+‡˜½ ®Ã   ó–†>Ø¿ø’Ä  û
+ ”JÊåt—oĞ x4 ” W€C:‚4 *t' ”$á…°‰sd' [ Wproxy/ ó(&Îñ{|êîûÆ®n ”,k|É@Ì£¥Osrc÷ 0	J¹¤&ö†ûd rñ4	]îÜ²ªFûµĞò?¿x ô8	ò±2r¯û¹hOÄ<
+kálÎ=m8û( ”@¤á„‘ZŒë R ”Dsş®çy& Ãpackage.json. ”Hu}çJĞK. 2‹˜L­”]¨z|cĞ ’ ”Pâ?‘¡UN> 	> Ÿ”TÑ<„7á‹" –”XGsRlßRG~& ”\Á;Í<(™mL Ú U Ş Á`gıÑÑûe‰2 1ìñ6	Ô   dâ©gÑJï~ Æ ”hlÖ©GåßË" eõ ól²Œ4‡Ä·‹û®m”pŞ¬|¶±Á ×Z˜ ”t~ß’‹¼¤ñ˜ Ÿt£óx¼îê%«¯Ùû*) L ”|Œ<§dù‘)+åB ¹€(­?Tuû/B ¹„´ıã¥I2¬û? ”ˆêÌ1»ß¦ ÙGˆ ”Œhà`º®9. Ë ”&òİIX¥Ó+ ³ ô'”6Áƒ$Y¥û» output!/home/giestas/Projects/connor-bot¹˜¢uˆû¦ì“œ ƒ¿ê\: —”	Ã “ !ğÍ²+G …¤!-±œW´†¹¨!g|¿
+ceû·o ”¬!u£-—†y¢HG
+ Ê°!’°Ïã!¬ûhC ”´#sm…¡O ñ’ ”¸#²’l”\U+ L ”¼%KR„›!  °/×”À&Fğ´…ÛÃ9 “ “Ä*˜Ñ9dIadŠ ¹È*âÑ3S· ûI…¶Ì/O¾
+T90åû¶ßAb ¹Ğ1¬‡¯òÚûôÔ2B¿¨à£èûg *&“Ø2zå˜p§¯’ ’ ÁÜ2ß²]Å%ƒİûõ‰öU=Z	z ƒ”à4ïËÀñ’"„šÛ‡”ä4ÿ_û ÷éÔùƒ²è5ø¢{KoXûgÓ#Ñapp nextUû«ƒ	ä    ì6%/ÃàÏ¶)† ë Áğ6CÈl¨&!xûØb[ !+6Ó   ô6ÀtªÇJÍÏ×j ”ø8W1»RòGj   5pagŸ”ü9zØ«V„h>ñ s?å£ 9¥n²/ò™2Á9ÈLˆí£
+ûb‹ ¤:Z*~ `‹ ¶
+ñ:ÿº‡"9ÁûQû?ô  ;	å£¢^¹ıè"w ”;R1BOØÃ Ÿfrontend8	 •;ì¯"bí.ø 4 ”>	+b¯åîÈ Ë`  >ÑñÆÏ¼,ò>¼ä   $@j-z4í@ØR » S	‚ “(@œÄµKz€¸í&¤,@³>Â2şÕ”m ¸0A:3ºùû“ˆ¤4AÙo«JáÁ= ¤8Bz¨¸kÃ« ¡	‰¤<C-ù£Óµò ¶ú ”@Cu9"bÔDu ú 3src² òDDW{«à–!%T '  favicon.icoîx/$ 45J'ÖHE~È³öZÄjûf )¤LEÖMF¨%ÎŠ „Ú“PEãc®<œ*ª„­ ÁTF/4ï¼àÿû/¶UôØ ‹ã  +ñ P’ ±XFŠFŞ%¾Ö Ğ„/_error tš² ’±/ ¸\G/°¼…&øûFê£`GVXƒ”St3w0 “dH. ‘z‡÷ © “hHï„ÛäX½ ¤lI@k6çõ+ò	§	ğ “pIÇ–üg‡I2î”tJl)Ì±H)3G “xJ÷.Uz#  ”|KR/Mö>ßõOO¥A“€Kïù§ÜwCb/_app )˜?ô„LCëyqûÃxÒ'²ˆLD%Ë„ß/ÅûjÉ ˜ŒL©“ò°©cí’£M[ÂŒìtáœãÇ”Nî¾^Íáûtì¤˜NöĞ¦Z·—ŸûI] ¹œO…í*æ`˜ûN” OıÙøM0AuK ÙK F ”¤QRyÁÈc . KÏ¨RŠÕ9<óûös• Å  ¬R‘²ËTAX²°Sş˜‡%eXûÙáHh+ñ ,ôK”´SŞ¶G
+²‹şuv~ ”¸SğT)ŠA~Ñ”¼UáÆ¿J–F ˆ“ÀVAŞ# S>¬;q”ÄWBÈÔ’^»œ˜ ‘‡ -
+rŠ“ÈWòÜ=Åš ˆH	ÂÌZd-¶’8âû³I9û°k•Ğ[*í¹xdh.ÁÔ[Çk*!€5û	&• ”Ø\ ‹²ªSp¡;ÑÜ]'¨tWÏùÀûĞr‚’à^´×N—Û ”ä^¶&{ZzFs^ ú~Áè^Äû'”èûâe· ”ì_W¿¨¿bY ) 6	8 ÿ ğ_^Cİ¢sÇû—  Ëûô`J:w‹jûš  .ïæ¨ø`»S‚fì–2Á€¤üdì¸kÌ7%/!¨ eŞÇ	E¶8Ó :	 Èeı«ÃÆ¬sÑûeí£h]›ìA9i½¨¤hgº¢ÑÈƒ A
+ ó	hÿá‡ÿQûZqû¢ .Eâ   ihœP5°øj3/„¤jŠíyı_Zúà ”j¸q2(=\²% ¯€¡ khŒkóå®f1ó
+  $k’æ*ã+ûXûZ next.jsâ(l_ùßüöû¡ 3“,m[ñIœˆj3Ä/_not-found=¸0qŒÀWN¥‘äûz¸£4qÜ  ¹*T`µn “8reæ¥wèH¾ l ”<tZÊ¤‡s`CÍU	Å¦@t”­·ÕZ;òìšê”Du6ÛMú).«äj'£Huš(-Öïİ‚› ¸Lv¶Ú)Tù£JûKŞ
+¨PxÄd5õÖrùóT	¤Tz4;´¯âš j‡ ²X{v4š-…û«û¦×
+ñTWû±x¤\{àÇèxqÆ¡Ê¤`|h)sB=½‘5	£d}sJ&·2ó	n¤h}Œ™R6%ï8¿ í ZÑl}–y,ü·×û E5¤²p}©VÄ|’¨­û×Kï! ”t;cõS¶ìÙ 
+Êí2 ”x`»’s†8 	. 
+A…|ƒU²õÔH)fÒB”€ƒ¤Ò{‹0” b ³ “„„lİ²Ë]y ’ˆ…Y
+I¯N	V($ ”Œ‡BÇ4¬Sºj ¦š ”‡çr^Äxcš#ò”ˆéŠùÁÍQû» pŒ¢%Y.Wô  ˜ˆöwÚDgg,ûT€û¢“œ‰¬!cSıÊE›µ ‰]÷IBZÀ¼¤¤Š
+\Ôğ’»Œ	€7|xõ¨Œ&º\9.ÇûïOûQø ô¬Œ}ÃÇA7,û°.A¸°Œ—
+8CÓû$¡´³«U†,áTuT¤¸F¶ğj+ŞÈã`ß¼UP94«ûÛ é6 ²À1}yJŒûÔò£	u.A /FAd0E 1&¤Ä½Wä§`ğA j ÄÈØH«D©Ÿlû’~”Ì¯¶iˆVè?LQ”ĞÖ8Š–1ºõm °”Ô‘fm§Æ3	ô[ Y£Ø‘oMKîã®#À •Ü‘¡ö"Z“©| Ô“à‘ÇÙFªJC e”ä‘ÓÁÛßúRC D ·è’×sõä÷v¤ì”G=c± \< úd”ğ•®VS·V% % j ”ô•¼Â×S`M*/ $á ”ø––o‚ûÖ€p9 (”ü–Æ¸…†!  6±¤ —¨IYÆÅS3 ØÈ—±RCíÏ6ûJ¦ù˜`/iøèûµ  ğ±„	c!¡˜(‡*‹½=
+
+È›S.¹øÉûMû°-ôœœ]îü9¤?ûøƒûRáÏ¼çº£M]úûÚÉ£î•ÛJ%š¡¤ !A®ÈñW—5@Yv¢$¥~NXÜW0¹¤( Ë¦9DİhE É¸,¡#«ÜVJráû¸¤0£‰€ ÔıFÏ4 Ø}Ï4¤mßOPB)ûÖå C/F  àÉ8¤hÙ{
+/ûD<’<¤œ—NÔÍÿ,–  6> ¨@¥ç?)K
+€é •D¥¯¾91£D	ô¹”H¦eìÍ‘F>…' úGş£L§6ÎœMSß7	 µP¨O
+rÉ×^ØûÀ‹”T¨²Èâxy
+ Ê*> ”X©óÆğÕ0Œ Ğ£\©Wâc|£0¢C …`©uzê)u9*
++ ”dª-n~uûŞ®˜ Ş¡ .…hª4Å²R¦ØU
+ñ
+* ¹l«e/G¤¤Œ×û©»”p¬Ù]PoN(~ 
+£¹t­;×ğê—4û.³ôx­÷;…Œ.³û¡ ïã”|®©GkÒËaGÙ 7tW¨€¯˜¼İ¬XòÜÇô „¯Ù\şb+AC!'o ²ˆ°ñAM‡$¤ûg7 Ü	ÂÉŒ±îŠ®e	öû Í ”²BöYJdõµ ˆÊÄı ”´O‡ê²Ëyû¡ Íİ].js  -on Cnodec ¨˜´"èwı>Bõ ²œ´€ØºŸ¢ïqû*®f¢‹¨+ñ Ğ š½ 
+`/€ Qnext/,ƒ.js‹ã ¯  ş ¡ ´“ü8á¨9ù ”¤µM¹rr¯­Í¤¨¶’!ú6¢ÏvŞ	1“¬·ø;ÅT|¨„t¿¨°¸-\
+DŸû.‰E
+¤´¹şÀÌg î¹¸¹ğøhÔ	xû¸ˆ”¼»ÄDtÊ;ªË É/£À½ì„Êoãøw”Ä¿‚Ú‚‘®F L<”È¿g“–A³5+ ”ÌÀ‹å\Kˆ" ;(¡ĞÀ§fš‘¢Wçrç¤ÔÁ5¬L½øJ — e”ØÁ<÷;ÁEN+ 
+Ú?É ²ÜÁKg;ıöTûñV:‘”àÂòİ}Óæ!­
+–”äÃMîQh¼3 æ
+
+÷èÃ„{9u¥óÖ " 
+/_document (™ÎÑìÃ¢Ÿf™ñû²µÌ¥ğÃ§ÚÆL Ñ'4™² '	”ôÄõ¶Ü]{L¦ °”øÅššÂ´=9^sÂ“üÅ"9DDlñÒş
+• ÆÄ£8· u‡¼P Ò  ÆÌS'´¤3
+ÂÇ/ıñ…ÈØ?û-Zš ·ÇÔH]Dµ¸¶ö £ÈU‰jâUx© |$¤Ë6°õ%/¶Fages:¹œŞ¼	ï
+ ’ÌÚ†¹áÛ»g  £Í¨v'˜ôB0³¤ ÍÍ’y2WÅ‘	«¤$ÎdÊ&aÑ™&X!uO	¤(Î™ó´ LÜ` ì
+¤,ÎÈ„¸Õ³_/ B¤0ÎÊù¸ïG93 	j	£4Îç7ÈÎÍpHóÌ8ÑÈ°„µ#ûh4Ò…<ÓT¼ëÑ¦Lg ”@ÓÑ
+Ç–› E! ”DÖ»h©tB¹! ±H×w‚«È‹•<#+ 	“L×©t…õhueÜ v!ÂP×¬÷Òòÿ ûœD– …T×ÕıçĞé”X×İÄ…ùî´wË b”\ÙÓ>}T–x } “`ÚÆåôoVA°¯¤dÛóÜDºk` ¿ tİ”hÜ©ÿ¡Å«iV* 5”lÜÍ‹)üµ¯æ— S “pŞ,œJ,Ûw±-”tŞ0X\”Uõ Ï ““xàµO©Ïç[Ï #”|á¤ı_p3ÃvÏ 9,^¸€áèãk
+ämû@k¤„ãGæÊB\Pİ§ß(£ˆäe&MZhp/ØŒç‹H|IüI¬ûä s	¤ç£€œ’hnH6 
+‘H 5T¨”ç±WğÑï
+Cs¤˜èØ ¯8Ú1((	jÆœèáÊ §?2û·627 ” ê§ÖyÑÑ¿™”¤êøg5üt_Â” eÀ%½˜¨ Œ_v 3app¸U_app	 y‘¨ëf›üµf&Rf&¤¬ì98-ÁŒø !	È°ìÓ´İ»‚'û’÷¥´ìÖÃ<ÍĞ¹Ñ
+˜ø£¸îìçûı«%é
+Ê¼ïÔ]uc'‘ûği¯Àğ6©I»€dŸ ÏÖÄğ­÷
+à4PÛû[=.ØÈğèàšâ^ŠÎûû Ù	¹ÌñòK§?™ûGÓ“ĞòC"ÇTã¡Y¨ñ	”Ôó³ëåM‘˜ ­j–´Øôx—&>„{ûĞÅÑÜô®«÷}ÂWûh0Œ“àôÅÌ©×lšØŠ ”äõš–pñÒ=A ”èõª+jV[š) ¢ ¸ìõÕ×€®Ÿ÷ğ0“ğ÷s…|Ãw˜ôøoV•ıw
+ÃÓ“øø½KÜÓ)­ƒó”üúóPp³È²[D
+¯6• û$ŞA‚	¬1‘š~¨üw™ vLîÉ³¤ı1:p'Ö/4Rğ E ”ı\é#»–‰‚% ®xÈş^éá>û¯¡•ÿÓ(±zT÷
+2G±ßÿıí™;ÒûÕ²¸P     0    (  $  $
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000005.sst
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000001.sst
+--------------------------------------------------------------------------------
+  ³òÚC¨   §İ ¦FF   ÏÖ ¦C$CG  Bİ ¦	 	  ô 3F`eCB&b_kh$\Xc[W^iZp]Yh  Vû› &   ÂÖ ¦wv  ~İ q
+   h ¤ë›Š¡(Ñä  ãİ BÑæ å ¢üÿÿÿ?  ò FÜ F   iÖ hV—& ƒ[Ö ZV? R   @  ¢ bÜ ÔÁ ògûÖ ûş ‹œ œB&Bù  øİ ëïúòûı õøûû ğóûş öîùñûü ô÷ ûş ëDÜ  ÛÛ BCªÚ© ì ƒ3Ü ¬ o#ï (  cwÜ î²ô BÄ^ Ã^ òû  û kkGsjÖ ef Q(ûFh bDûE Aûİ)	â)‘ Âİ ÔÔc ê) ÷    rûQ qb2ûı d1ûü fò  × 
+ &&V ó	KÖ I$$   ïÖ îo$û½ ½ ò’BC&$’‘ ’F¤Wû± V—[ôñ Œ*+
+ ¡Š›I%¯ñ
+MR$O>PL  –ûœMÄû$û"û(° ‰ ûG màD^ $^ Õ   zÓ y* ôôBDË^Êbõÿ üÿÿÿÿ  ) ûH<P |Ş ,ô	!× 5’ û,û)û+Ñ &Ñ £ 9S ‰>ñ =–6æd ò$   #Ö 
+“š˜™—–q  ’± 	b?+ñ ro 8Œ× Œ‰  ï pÉ~ –"mÜ)8 ¬¼/»`S,Sş )ş 1	oy’mkfnÁreİ êØ’ûı Ö ûü ÜDÑû[Üª ô$Ü 
+ûGû9û@5 2£ ;‘ ´Ö BBÀÕ ¿Õ 2$ S]Ö \{Ù 3H BC¸6 ·6 Ò  †ï 5t¤1sû™< 8< Äû:ûAû3° '° 3FUº2$ ¼± ’,ô (m ÒĞ 	 YCñ%Ö X@  ˜² ’   " m   l)# TĞ 
+âa QQSCPû‡×Q  š\ ò‹   ®C*­*Í "û=]#ûû$ú"2_ˆ’dÖ c2 V.A -£²a	 	  ¹òK è ÔFûûûûû ûûûûû	ûûûûûÿ û
+  ûş ûš(¬‰ t   û¾NısMİ ©âUû« <’3â Y´rV87<U6? 5Q2[B‚’Zİ VFBYÒÖ ÑåÜ– ³   ‰1 —$û{ùª 2õC¬ôôİ ëû<ûCû54 .¯RB°¢ ¯ŞíÁ' B3f1AH{f @İ =7º¡ Ã
+ 
+  9û°jJ+(ñ•„	  €û¢Èı EX ¸X Ô 2CóÔ òÔ ¡¥ñ ¤ƒy"ƒäÄûûûò ò — U7I 5ŞOñà™° ò 	3<ˆ‡)‰ËU(2 +"ûâ 2wÏ 1}û²9­ØN ] À ÄûDû6û=© /© Á®
+®          	 ù/ûû.û/û&û1û-û2û0û!ûû û'BI ½ YÅXÅÄûûûÍ Í ,…÷Ö öëó	ÿ"6	ñ%Dİ ChÑ¦ûş xebwr{}s|~  qP%“4“í"û? 1h`AbkO óC_F$\cW^ip]h  —Rñ	¦¥+¦ ¦f>¨ÑÑ ºa®        	 
+ ı ûûûûûûûûûû´ô gl
+  fİ eû;û4ûB®-® Õ¾½RB%š	#Aİ‘Q!Ô!¤ë›>(ø
+RõÖ ô%vÖ u~
+´m ³m İ#ìñ¾”Fû8û?¨ 1¨ ğ	ËRÑê© éM J1T¨FTPˆ¶@ N	&Ğ òxÒ —–q€Uj’€’Dâ… á… RB²ã ± i2|û±*BB¶! µ! !3¤ a 2Ï -åKR WJİ Iv÷öe!/Feš7 †RùÖ ø’2ÑÖ\ Õ| ·ÚŞQ£  ¡è'…HÖ @?@g / ¢   5Ÿ’5-Ñèn çn ¡ ¡¶:O ÿ%ûûû[5ù3$&FÔRwbx`k_moâû¸ñTÓ P ‹   Š2 Éö Èö ¢†86<Uõ5D -FDE  Cİ ¦	Ö6FÆ!z ôztû#û%û*0!0	Ì1]C¹c \İ c#RÆB„Å¤ RBÂ Á ¥	Uf ô)	®– 2_RÒ b !ÔÜ 13!FFÍP ñ	® _Q®       	 
+ ñ x  º+a® £         	 
+ J}E	Äñûş CB$&í¯ì¯1íA‹¢uò¢BR3M$&O>P?[=…"æ¥  ¸
+C…û·nRC¬C«C_*6–  h ó©RÑÓ6Ğ> J
+ŸÒ Ÿ±ñğmmÑdkÜ ¡ D¡ Bé1J - 
+İ„ñÖ ğëÀÒ]ÑçNûş n ¢_Ü   ØBÑÚë Ùë ¯ ¯ — >} G¦    sBYGÖ Bû¦ûû Ö úë"59 a`$	_†Áb\ead`ƒ! cî	)—(Ó…,!0E,)A¥ ïÔ Q#%iâ "H „<§±€û¢ 5,Î¡-+ -DDûàDD•„× 5’8´³ 1kÇ! pµÙ ß)P„w º¹¦RÑØ·× 2Dà ß ñ	I@3I@HgI=¤µNÖ MQL7E72&‘ Â‘Ö ok±nÖ e‹£IE£¡A Óó(¡ëŠ¤›  È]ˆ]
+[	[
+[tF© 2hjı ge
+Q
+!9Õò:…;	  8j 5DÍ, Ì)N BN = ±”…   “j7^UEÖ CXXJ CJ ‘  ›
+Mc&•RLJK=1L=KK9›æÑóÖ òë‚U"‚SRDŞ;İÌ 2
+ ²$×çŠYÊH 
+× Qè1$}Q"'¦ ¢  b·ÒaÖ `c"Bea, èóG#ÙÜÉßÌâÏåèÕØÛÈŞËáÎäçê×ÚİÊàÍãæĞÓéÖ 
+
+  Çûš ¦  ™² è
+Ïø Îø ÀÑi  hİ «" Úûÿ İ ûş  4* æ‡‰²`_`_¶^¢ø=Vq=V€qU €•¾E¢MNM$I LÊ BI–« # 2$Áô^Ö (&$	ÔF
+Ã°¶¼©Â¯µ»¨Á®Ç´º§À­Æ³¹¿¬Å²¸¾«Ä±·½ª
+ Ç
+ 
+  :û¬6²xwxvÈ“uû q
+’./14074(öïöîö1Rç2RNK QK êoä*uImab)#`Ùk&1{û°œ :Òë	 o›Äû7ûEû>{0¤
+É ®1İ óiªª 3F^‘ 1ƒûR9²’uuyI €tû‡ q  ÄR H  òÿÿÿÿÿ,   (   <   P   d   x   Œ       ´   È   Ü   ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü  	  	$  	8  	L  	`  	t  	ˆ  	œ  	°  	Ä  	Ø  	ì  
+   
+  
+(  
+<  
+P  
+d  
+x  
+Œ  
+   
+´  
+È  
+Ü  
+ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ 'u.ÊS{F§           [6ûcƒİÏ<â    y)|³1¸B â   # §¥ cñÓ â   =\ÂüÙV âK   JM%Íªö§\Â â   •şpƒ„İx~ â   ¤½nğv â"   »G¤è¸¬ã æ   İcÀq·ëå ¢î"PËdF â   ÿb‰E /]i â  /^Ø%5[ â  ,8K<<	b ñ   >[j“hº,İ á  V½tá:k²› ò    iÕ¼–™‰ø â  { /~¢‘"í â7  ’L÷mJŠ]Û æ  É”„®¸6:© ¢ÚùqÓrîo’3 â  ë®UÇ².$j#Œ å  G(x9á’¤w( ²_ôúe9o’ â  +p2r-İ†Ã â  8ômÀ=x¸×P â  Iõ(é£Mj( â  Xïşÿ	çÃ(( â  jO[z¡3Y2 æ  {h}ˆÄVâ< ¢’/VfM3®& â  ¤Àìx0¢eæê â  »BDÅõF9Ùr â  Ícíü¬6ü â  İÅã:851 â
+  øÏ]ù\gÙÂ â  w´ªŸNK â  ¡cÃSFØï å  #ğ´£x2YÈ ²8xCß×ÀÜƒ( â$  O®$›èÙ½W â  s ŞÌHÁ‘é â  †"+¼ÂûÄ0‹ â   “"ÍB‹Ê@Å%d æ  ³#l!¦yccÿ–( ¢Â#µ¼6Ài]  ( â  â&<˜Òã à( â  ÿ&ëJh`¹„ì$( â  'òFÙ,z( â   'B§ıNf
+( â  -'Mêk%F Ú â  ='Z}n¼}bÊ< â  L'zó`ÎÜ² æ!  ]'}B²õx!,<< ¢~'½Á£oJeŞ( â  (cÊ·fÿO! â  Ÿ(oÒÜi”&< â  ³,â&‡mŠk9 â  Ğ,ıO1‡˜0>< â  à-ŠÔÚL§oæ â  ñ.È”åİ|©# â  1ëu¦Xeäa’ â  5™vÑûík+ â  07
+";9ØŒ â  O8"C(‘†ÉÙ â	  f8B,´*Ç×OÉ â  o8bcapÉ÷m â  9Dx¿R‹Y	 â  ™; ¶-=<.Ä» â  ¬<~Ì1İÄ,ğ â  ½<ğg¦´•g†) â  Î> HëoÉ9Te< â  Ş>ì6²©Z²ı â  û?‹-¢^W< â  ?ıû;}Püñ$( â  +B--Ck2( â  CC1ÆuŞæ'; â  `CX8arÜ§Ö< â  oC{h©|¯Ø›¿ â  DeÑC¥vÒ³] â  ’EÂçƒ3P â  §F°^}'UÉ·( â  ·G¹¨÷í† â
+  ÈH%‹@=$¯és æ  ÒHkï’ÈŠF 8P ¢ãHçQ…ù}' â  óI’GéT¢ÿï â  IÑš>ÙóC¼P â  #IÒä•b>, â  2Iÿ;«G â  ?KLLÇæÜ‡% â  TK_l¿oó˜ â
+  lLLëÄÏNr â  vM;½E|eyl æ  „NH×c‡ï ¢“NP\h^ø4 â  ¢PÆy	ßÙP â  ¯Pq×´¸bsÅš â
+  ÈQaQ…sÉŸ â  ÒQ³”­ú)¨­ â  áR9|j‡²=â  òR[£eıq_ú( â  R´H>qÂBd æ  S6V »z[ó. ¦)Tõşv¼É² ¢8WDÀV–jçt â  GW|6}Îcì© â  TWõN51¡Nş âW  jY!¤)B¬ â  Á[Gñ‡œÃ”ß´ â  Ğ[¯ìNˆI%ˆM( ñ   á[ÅiŒ³2R„U  á  ø\‚T°9.MY ò    	\¡zEü¥6 â  	]MVµ0Á³—Z â  	.]e	[*-» Ò â  	E]ßÈ	v…Ü â  	T_-ÍÎ‰‰ â  	f_]"šd´ â  	t_…a!¤Ÿô( â  	‹`ŸLkO.( â  	¢`¾©!Ôºw¯( â  	¿`üÚê4ÈVP' â  	Ğa=î€œµT@ â  	Şan>Xƒ"Bêº â  	øa®÷¾‘X£89 â  
+c“¦\TÕg+x â  
+d×Hüò]”( â  
+)e3Ÿá%€ â  
+>eÏ7‡¡À1ç¸ â  
+PfòqÓRÅıeò â  
+_gJn)Ï  ¥ â  
+vhô–V ‰‚ â  
+ƒk#Ç_Æ`ìŒ â  
+”kñ«‹çG7( â  
+±l† STvôuO â  
+¾lì<£”i° â  
+Ñm“ßæ´ÈÅ( â  
+àmÃTYnÆK¦d â  
+ûpÛvœ©¤a}( â  qBL‹`ıIªØ â  r¦Œ0æIlÀ â  .r¯ßÇäĞ•g/P â  =sCDñ@Ê%k( â–  Zs€ë…‘_;,X å  ğtHˆ8ÚÍÊp< ²
+tQßÆSİ
+÷( â  'uEÍÅVh.( â  <wç·fpÍD( â  KxRâ¼Á5(q â'  gz<\—ÉÂ/4< â  {#ôÁÂ? â  {7^X\zúÉ—< â:  ­{i(ıSÎˆ«¤ â  ç{åtôlC£¨ â  ÿ|xe ­Ìf â™  |ÇÚÇÜ½¶f â  §}××ğ-x æ  ¸~º”¾‚½( ¢Õô}¹h˜–A â  æu}4^¡Íß  â!  úƒIq|?iN õ â  ƒqÿß£v â  0ƒí-)¶Ÿ;Á³ â  B„·qê—>Jì å  S†!e	51  ²`‡Ëkj3ê"Ë( â  }ˆOÍêÂËß9é â  Š#ˆ¹¢[ÏÔ< â   Š8§×3S( â  ³ŒptÕ¬.¿®¶ â  ÀŒÏSŸİT,& æ  Ïº\«QMíQx ¢çui‹U|˜• â  ÿÆa$¦/èsá æ  ´ÃÅcBš± ¢%¾–etE~‰| â  6‘’.¬e’å7µ â  F’N
+»¿Acó2 â  W“/ÚÑ—sŞ<J â  f“±Êß¹×"÷ö â  w”Ú¶vîZ¯/ â  ”óÎÖ{&ù%7â  –T¿Md,òù( â  ­—7çd»j˜Õ â  Â˜˜üâŞĞŞ}Ú â  Ó™+|Büï#£ Ó  åš/øF@EÍPÅâ  óšBÄêÚ4ƒg@x å  ›o®ì©ƒ< < ¶²KS@4 ¢"S¶ev‡Cç â  0] ¡k"Bï P â  A÷áäEæ: â  T! ì·yí{< â¡  c#.^'×T â  D^†=–ÅŠ â  SŒØKÃ1
+È â  & ±|xõrZj5 â  7¡BôÇQniC â  M¡æÇº‹©6Œ â  d£œØ2qÂ2[Æ( â  t¤‚ùEû<y â  ƒ¤Ì—tkÜÇ!< â  ©ÂÅOq™(\( â  ­©"Íº¡‡Å æ  Ê©ø´‘˜/Á ¢Ûªş&ò5‡ â  ì«·©*—¨|d â  ù«Î%¯Äâˆü®( â  
+¬>,®T±§ÍR æ  ­iÖq¯$íÔ ¢1® ’“šz â  I¯‡ƒ;¤0ÖÍ â  W¯Ö­KÔ’˜T âf  i²T`}¯™}Œ âª  Ï²”¤#|ÎòÄ( â  y³m'—{Õ§£ë â&  ˆ´Øú´tó©ï¡ â  ®¶ê«&¨= â)  À¶”‰,Qß\€"d â  é·ÊH›–( â  ù¸­ú¯¬‡… â  ¹ <ßwH!L« â  ¹á0{€*P â  /¹kğ®²¿( â	  @¹m™Î¡( â  I¹’ˆtJ½	Ğ( â  \¹Ókq:€¶ â  m¹ô}J«¢ â  €ºSÏ*S8Äğ â  ’»:µ¬|ˆd â  ©½}ß]ºĞ‚k( â  ¸¿bïĞ£-dD( â  Ğ¿Ó"—?#1( â  áÀ™wÎ¤Ø“¾ â	  ïÀ¨›Œ!ğ©ñ â  øÁŠâ÷2`Ñ â  ÃÙN]ÊÀ¤_ â  &ÃÔ‹/yÒ¹9 â	  >ÄĞ]JïybÙ â  GÅHİg®ZV  æ  XÅñõñx*¯!> ¢gÆw‘/ÇC1fG â  vÆ{¿Şh® â  ‡È¬´ÑˆsWGd â  –ÉVY[¾û â  ¨Ê0àH‚«ÏÍ5< â  ¿Ëbo¦ÂUAc( â,  ÏÌCÎÇxCÓ â  ûÌ¤ú¨bŒ	0 â  Ís©êQMÅAP â  Í¸5?¸ 6’ â  ,Î.ô'¢U¡Ü"< â  ;Ò·½XáÓG; æ  LÓ~sÀSÃÉ<) ¢aÕ áwşUP â  vÕòºØ— â  Ö$„ã–6q€„< â   Ö‹swÛ Lk´ â  ±ÖùëMªäbp â  À×V×¶/Åñ* â  Ô×¡‰üÇóáÑ¹ æ  í×ßŒ_%†× ¥ş×ê«:˜³Cß ²Ú*KFMd1? â   Ú£\W{‘H/N â  :Û1ãWÃø3ãEÈ â  RÛ¿ÂLF·ó-‘( â  cİıõÖ•iv‰n æ  uŞ$	¢ ¢„Ş×n¦¶/O£P â  “ŞáÂ¿êÈ( â!  ¢ŞéÑ¹5Ìˆ â  ÃàX)ï.³{Š	< â  ÑàÚ~âlî'!
+ â  èàŞlÊãBşĞF â  ûá¼ƒ9b¦—gP â  áæªzBğÊ8 â  ã|ßÇü—QÌ å  8ã­2ƒ[î#BP ²IåXt1@«û“( â  ZåZ@åú°×E â  uæ$ÕWÙ< â  „èägÈ×QC â  “é«Ä,(X9³< â  ¤êSxßD´­I â  ²ë$0G©ÅíVœ â  Ïì%“R]÷A5ó â  Şí9(ÎSN–6 å  óîBæm©hœİ ²ğ'ºv¿èÏ â!  ğSg%t²¦
+ â  6ğ[tMÄ*è â  Lğ{şõû‰î± â  ^ñ›UO¢Ì#a â  wñ˜`RÿúX â  ŒògËlœ&9õÇ âO  £òßùz‘E—Q™ â
+  òó#sW™0Î â  üó`N=Fiœ9h â  ôSšQúÎÿ Ò  !ô/” ËSQgò    8ô{Y¿óo K‡( â  Lô•g—nÜ ä^ â  Zôèm?êØtğ< â  võŒä1|¬Nû¾ â  ”õó*fEÙUÃL â  £ö#ûºwKXªy â  ¿÷EÁßh ( â  Ö÷Uô›
+ÏÏœ¦ âY  è÷†XQµ#§°: â  A÷›yr«Zu â  TøN à'ÌW- â  møT{uÊ~	î â  ˆøg‘êÀ¾	9Q â  ŸùR1ñl>’ä â  »úúäO‘ü
+´ â  Íûø2ğâĞÔ`( â  Üıh^1‚š*{ â  ùıÏí*PnçÁH< â  	ıİf¸Ùo( â  ş!Ï¡Mæ10( â  4şM[;CO( â  Qşº:™¤+Äª â  hşâ×í $Ê< â  wÿğy:HİLƒ( ğ
+  Šÿ–d®èRt           0    h  .  .
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000001.sst
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000004.sst
+--------------------------------------------------------------------------------
+  %İòû Ğ frontend/middleware.tsxû   $js6 6 ásrcû°h ûgS  ô/app nextUû«  Y & ”proxy.jsxb ñ$node_modules/.pnpm/next@16.1.1_@babel+core@7.28.5_ ò-plugin-react-compiler@1.0.0_ ¢dom@19.2.3  	 /€ ô
+next/package.jsonû?) ¯ Å tÅ  ¡jsxûµĞ$h 	" D Œ #m» õsrc/instrumentation.tsxğ"/ á / RjsxûeL) Eìñ ? 	/jÇt˜ˆû®™‘Uyò#û¸_²/ttÄ  û‡Ç !ûî ³wöañu &agò‡ Qjsûñà¿ŒKÙ õ ûĞĞ ûW*¸
+£	DZ V ¸ 1û-Cûò‹ã  +ñ P û¡ P"û¹ùZŞ;ûh9„ûÆ®Û#ts2 “ûÃxÒ  Jä/favicon.ico43xû[K d  1jsx?3Ğ † e Eû’K&?c\appû/:Ø ¯q S‹ã û’ O º tŒ,8e ßÌ#tsNÑ "•‚å[½!—ÓHıHsrcMÕôlÚı3bŒQxûÛ 4t{	Å„d rûQë
+Ã »  @ ¦bò» project!/home/giestas/P ås/connor-bot¿ T.next{ *ó0 ¡pages/_appXĞ ˜)&	s±app.js‹ã « 	 ÷QO¹ l¯û» outpu´3 ûëQä OB³Uerror šç lÆ
+ ¡ ¢!_  1û OT˜² r·	ÿù' ª
+ë( 	!ØÈ# ÈD+ñ @  	“ 3xû·ª4( D
+ <
+zÍ Ğ Í Ù÷…… :û¬O  9apps/ûÖĞ †/F  .A Š
+Rù Dsrc cõtsxT '   
+_not-found 5> 5JÑ ™ğ U#js', ëAtsx<çÄ? 3	c¨Ysjsxû—  Œ~;û²ût 9û°²ÁZqû¢ .’Ål ¡	atsû	 ™õõ
+’Ç”û°.A ¬ëªïTB'P2û¦‚Ef |û±·Ë Y 
+ÓGQût 3	Í	º6 iø2tsx}5/a y ûµ  ~d„iW 
+:
+ ~/JøÊttsx¼  B>n× 
+8É*ûKï ]x Sæ	s	²Ø]*9
+m–(
+S+¦jsûQûØ„ (jsÅ]Vsrcû¶˜k³aK	áˆâ…d™Éjsxû¡  .a*  ].js  -on DnodeŒ	/è	< 
+	nK/ûÚ|	$+ñ¤	‰N ›Ş¡TAjsÖ M uš² ’±óD	ñ ÚM  ¦_’± ûÔë ¡.A /F ,ô>f0E 1
+iŠ3tsxÌ3ûzÿ’ÃRÒ ûûã ¸Ñ_tsxûÕ™ • › ãO«¯¡ud“ 0 G 	N KSjsxû©fS› / 	–a 	ä×æG†Btsû  DÃ  { X È Btsû.* öˆ•c2ûI/ †ûT€û¢TÚ …û¡ ïÒmERtsxûfrè(Ğ”j,		Ø	ãsûĞ ûFÚ ¬Y 
+Ššd	g “4œ6/ 3	BFK
+¢¶ ¨ÍÈ©‚± VS ‹$ÀÚ» 2
+û×È•lK
+t!Â‡ 1¯jsûøƒûRá$ts~	S£ Wû± û@Œ óãÁ%Z$ts[ÿ 6>ñ90	ì—{Š º[M{Cš² 2 û*W…G 65lÍ•£jŒ  R
+¸Ñ/hqbR 7 ø° !Ü> ÷Ö " 
+/_document #™ê	ñGqD™² èÌ	ctsûğáæ&RjsxûJ©#ûD É 
+ Èãš €ÈU ¥ñ  İ 
+#›İr¤ &	¿
+ Œ;u	†+ [
+ÂZ next.jsHs  6ÁUN2à’õ° ¾Ø‚GO ÓåL j»5 ûï¦Ù!´ %+ñ³;FùxT ™” UWb/ û·‘=š R ûgş	t	)X]W_jsxûöÙ’   ûä rûQ   ÄR H  òÿÿÿÿÿ,   (   <   P   d   x   Œ       ´   È   Ü   ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü  	  	$  	8  	L  	`  	t  	ˆ  	œ  	°  	Ä  	Ø  	ì  
+   
+  
+(  
+<  
+P  
+d  
+x  
+Œ  
+   
+´  
+È  
+Ü  
+ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ     ´  È  Ü  ğ      ,  @  T  h  |    ¤  ¸  Ì  à  ô      0  D  X  l  €  ”  ¨  ¼  Ğ  ä  ø       4  H  \  p  „  ˜  ¬  À  Ô  è  ü    $  8  L  `  t  ˆ  œ  °  Ä  Ø  ì       (  <  P  d  x  Œ 'u.ÊS{F§            [6ûcƒİÏ<â     y)|³1¸B â   6 §¥ cñÓ â   K\ÂüÙV â&   SM%Íªö§\Â â   yşpƒ„İx~ â§   ˜½nğv â  ?G¤è¸¬ã æ  GcÀq·ëå ¢]"PËdF â  sb‰E /]i â  €/^Ø%5[ â"  •8K<<	b ñ ™  ·[j“hº,İ á   P½tá:k²› ò    pÕ¼–™‰ø â)  v /~¢‘"í â  ŸL÷mJŠ]Û â  µ”„®¸6:© â   ÇùqÓrîo’3 â  ç®UÇ².$j#Œ â  G(x9á’¤w( â  _ôúe9o’ â  ªp2r-İ†Ã â  ²ômÀ=x¸×P â  Ğõ(é£Mj( â  ×ïşÿ	çÃ(( â  òO[z¡3Y2 â  úh}ˆÄVâ< â  /VfM3®& â  'Àìx0¢eæê â  BBDÅõF9Ùr â©  Wcíü¬6ü â(   Åã:851 æ  (Ï]ù\gÙÂ ¢0w´ªŸNK â"  8¡cÃSFØï ñ %  Zğ´£x2Y á  xCß×ÀÜƒ ò    š®$›èÙ½W â
+  ¸ ŞÌHÁ‘é â  Â"+¼ÂûÄ0‹ â  Ê"ÍB‹Ê@Å%d â  Ğ#l!¦yccÿ–( æ  Ø#µ¼6Ài]  ( ¦é&<˜Òã à( ¥ñ&ëJh`¹„ì$( ²'òFÙ,z( æ  
+'B§ıNf
+( ¢'Mêk%F Ú â  'Z}n¼}bÊ< â  .'zó`ÎÜ² â  E'}B²õx!,<< â  M'½Á£oJeŞ( â  U(cÊ·fÿO! æ  g(oÒÜi”&< ¦o,â&‡mŠk9 ¢w,ıO1‡˜0>< â  -ŠÔÚL§oæ â  ƒ.È”åİ|©# â  ™1ëu¦Xeäa’ â"  ®5™vÑûík+ æ  Ğ7
+";9ØŒ ¦Ø8"C(‘†ÉÙ ¢à8B,´*Ç×OÉ â  è8bcapÉ÷m â  ÿ9Dx¿R‹Y	 â  ; ¶-=<.Ä» å  &<~Ì1İÄ,ğ ¶@<ğg¦´•g†) ¢H> HëoÉ9Te< â•  P>ì6²©Z²ı â(  å?‹-¢^W< â   ?ıû;}Püñ$( â  -B--Ck2( æ  BC1ÆuŞæ'; ¢JCX8arÜ§Ö< â  RC{h©|¯Ø›¿ â  mDeÑC¥vÒ³] æ  ŒEÂçƒ3P ¢ªF°^}'UÉ·( â  ²G¹¨÷í† â&  ÍH%‹@=$¯és æ
+  óHkï’ÈŠF 8P ¥ıHçQ…ù}' ²	I’GéT¢ÿï â  	IÑš>ÙóC¼P â  	(IÒä•b>, â  	BIÿ;«G â>  	JKLLÇæÜ‡% â  	ˆK_l¿oó˜ âĞ  	¡LLëÄÏNr â  
+qM;½E|eyl âˆ  
+wNH×c‡ï â.  
+ÿNP\h^ø4 â  -PÆy	ßÙP â
+  5Pq×´¸bsÅš âØ  ?QaQ…sÉŸ â  Q³”­ú)¨­ â  $R9|j‡²=â  CR[£eıq_ú( â(  KR´H>qÂBd â#  sS6V »z[ó. â  –Tõşv¼É² â$  ³WDÀV–jçt â  ×W|6}Îcì© â  ßWõN51¡Nş â  ãY!¤)B¬ å  ñ[Gñ‡œÃ”ß´ ²[¯ìNˆI%ˆM( ñ   [ÅiŒ³2R„U  á
+  6\‚T°9.MY ò  &  @\¡zEü¥6 â$  f]MVµ0Á³—Z â"  Š]e	[*-» Ò â  ¬]ßÈ	v…Ü â  ¸_-ÍÎ‰‰ â  Ê_]"šd´ â  é_…a!¤Ÿô( â$  `ŸLkO.( æ  ,`¾©!Ôºw¯( ¢4`üÚê4ÈVP' â  Xa=î€œµT@ â&  san>Xƒ"Bêº â  ™a®÷¾‘X£89 æ  ´c“¦\TÕg+x ¢Ëd×Hüò]”( â  Óe3Ÿá%€ â  òeÏ7‡¡À1ç¸ â  fòqÓRÅıeò â$   gJn)Ï  ¥ â  Dhô–V ‰‚ å§  Lk#Ç_Æ`ìŒ ²ókñ«‹çG7( â  ûl† STvôuO â   lì<£”i° â$  #m“ßæ´ÈÅ( å  GmÃTYnÆK¦d ²MpÛvœ©¤a}( â¢  UqBL‹`ıIªØ â  ÷r¦Œ0æIlÀ å  r¯ßÇäĞ•g/P ²0sCDñ@Ê%k( â  8s€ë…‘_;,X æ&  @tHˆ8ÚÍÊp< ¢ftQßÆSİ
+÷( â)  nuEÍÅVh.( â
+  —wç·fpÍD( â	  ¡xRâ¼Á5(q â±  ªz<\—ÉÂ/4< æ  [{#ôÁÂ? ¢c{7^X\zúÉ—< â  k{i(ıSÎˆ«¤ â  ‰{åtôlC£¨ â   ‘|xe ­Ìf â  ±|ÇÚÇÜ½¶f åˆ  µ}××ğ-x ²=~º”¾‚½( â  Eô}¹h˜–A â  _u}4^¡Íß  â  xƒIq|?iN õ â$  €ƒqÿß£v â§  ¤ƒí-)¶Ÿ;Á³ â#  K„·qê—>Jì å  n†!e	51  ²v‡Ëkj3ê"Ë( â  ~ˆOÍêÂËß9é â  •Š#ˆ¹¢[ÏÔ< â  ªŠ8§×3S( â
+  ÅŒptÕ¬.¿®¶ â#  ÏŒÏSŸİT,& â  òº\«QMíQx â«  ui‹U|˜• â  ¶Æa$¦/èsá â  Ó´ÃÅcBš± â$  ä¾–etE~‰| âS  ‘’.¬e’å7µ â#  [’N
+»¿Acó2 â  ~“/ÚÑ—sŞ<J â"  —“±Êß¹×"÷ö â)  ¹”Ú¶vîZ¯/ â  â”óÎÖ{&ù%7â  ÿ–T¿Md,òù( â)  —7çd»j˜Õ â  0˜˜üâŞĞŞ}Ú â  K™+|Büï#£ Ó  eš/øF@EÍPÅå&  „šBÄêÚ4ƒg@x ²ª›o®ì©ƒ< < â  ²²KS@4 â1  ÍS¶ev‡Cç â  ş] ¡k"Bï P â  ÷áäEæ: â  /! ì·yí{< æ  7#.^'×T ¦?D^†=–ÅŠ ¢GSŒØKÃ1
+È â  O ±|xõrZj5 â3  f¡BôÇQniC æ  ™¡æÇº‹©6Œ ¢ª£œØ2qÂ2[Æ( â  ²¤‚ùEû<y æ
+  Ğ¤Ì—tkÜÇ!< ¢Ú©ÂÅOq™(\( å  â©"Íº¡‡Å ² ©ø´‘˜/Á â  ªş&ò5‡ å  =«·©*—¨|d ²E«Î%¯Äâˆü®( â  M¬>,®T±§ÍR â"  l­iÖq¯$íÔ â  ® ’“šz â  ¯‡ƒ;¤0ÖÍ â  ¦¯Ö­KÔ’˜T â  ¼²T`}¯™}Œ â  Ä²”¤#|ÎòÄ( â  È³m'—{Õ§£ë â  æ´Øú´tó©ï¡ â  î¶ê«&¨= â  ô¶”‰,Qß\€"d â  ·ÊH›–( â  ¸­ú¯¬‡… â
+  ¹ <ßwH!L« æ  '¹á0{€*P ¢F¹kğ®²¿( â  N¹m™Î¡( â  V¹’ˆtJ½	Ğ( â  u¹Ókq:€¶ â  ¹ô}J«¢ â  ˜ºSÏ*S8Äğ â%  »:µ¬|ˆd â  Ã½}ß]ºĞ‚k( â  Ê¿bïĞ£-dD( â  ã¿Ó"—?#1( â  ëÀ™wÎ¤Ø“¾ â  ïÀ¨›Œ!ğ©ñ â%  ÷ÁŠâ÷2`Ñ â  ÃÙN]ÊÀ¤_ â"  (ÃÔ‹/yÒ¹9 â  JÄĞ]JïybÙ â  RÅHİg®ZV  â  lÅñõñx*¯!> æ  €Æw‘/ÇC1fG ¦ˆÆ{¿Şh® ¢È¬´ÑˆsWGd â  ˜ÉVY[¾û æ(  ­Ê0àH‚«ÏÍ5< ¢ÕËbo¦ÂUAc( â#  İÌCÎÇxCÓ â   Ì¤ú¨bŒ	0 å  Ís©êQMÅAP ²Í¸5?¸ 6’ â  'Î.ô'¢U¡Ü"< â  .Ò·½XáÓG; â'  ?Ó~sÀSÃÉ<) â  fÕ áwşUP â  lÕòºØ— â  ‡Ö$„ã–6q€„< â
+  ¦Ö‹swÛ Lk´ â#  °ÖùëMªäbp â  Ó×V×¶/Åñ* â  ğ×¡‰üÇóáÑ¹ â  ø×ßŒ_%†× â  ×ê«:˜³Cß â  -Ú*KFMd1? æ  >Ú£\W{‘H/N ¢\Û1ãWÃø3ãEÈ â  zÛ¿ÂLF·ó-‘( â  ‚İıõÖ•iv‰n â•  Ş$	¢ ñ   2Ş×n¦¶/O£ á  ?ŞáÂ¿êÈ ò    GŞéÑ¹5Ìˆ â=  OàX)ï.³{Š	< æ   ŒàÚ~âlî'!
+ ¢¬àŞlÊãBşĞF â  Ìá¼ƒ9b¦—gP â  ÔáæªzBğÊ8 â  ïã|ßÇü—QÌ å  ã­2ƒ[î#BP ²åXt1@«û“( æ  &åZ@åú°×E ¢7æ$ÕWÙ< â  HèägÈ×QC â  \é«Ä,(X9³< â%  dêSxßD´­I â  ‰ë$0G©ÅíVœ â  £ì%“R]÷A5ó â$  °í9(ÎSN–6 â
+  ÔîBæm©hœİ â  Şğ'ºv¿èÏ æ  ğğSg%t²¦
+ ¢øğ[tMÄ*è â    ğ{şõû‰î± â   ñ›UO¢Ì#a æš   ñ˜`RÿúX ¢·ògËlœ&9õÇ â  !Qòßùz‘E—Q™ âä  !_ó#sW™0Î â  "Có`N=Fiœ9h â  "YôSšQúÎÿ Ò  "nô/” ËSQgò    "Šô{Y¿óo K‡( â  "—ô•g—nÜ ä^ â&  "ªôèm?êØtğ< â%  "ĞõŒä1|¬Nû¾ â  "õõó*fEÙUÃL â  #ö#ûºwKXªy â  #%÷EÁßh ( â  #D÷Uô›
+ÏÏœ¦ â  #[÷†XQµ#§°: â	  #q÷›yr«Zu â
+  #zøN à'ÌW- æ%  #„øT{uÊ~	î ¢©øg‘êÀ¾	9Q â
+  #ÎùR1ñl>’ä â  #ØúúäO‘ü
+´ â
+  #îûø2ğâĞÔ`( â'  #øıh^1‚š*{ â  $ıÏí*PnçÁH< â  $6ıİf¸Ùo( æŒ  $>ş!Ï¡Mæ10( ¢ÊşM[;CO( â  $Òşº:™¤+Äª â   $éşâ×í $Ê< â  %	ÿğy:HİLƒ( ğ
+®  %%ÿ–d®èRt      
+  %Ó   0    /  %  %˜
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000004.sst
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000008.meta
+--------------------------------------------------------------------------------
+şJÚJ                 'u.ÊS{Fÿ–d®èR      %¤     ^  XbûH ĞLÕ•fôØ[ñ©f.´   ĞÄxìû>¬] §–óğã€ÃŠø ˜€Ô 8
+€ì	•H    Í¯‰ä: ¸`§Ï€vŸ<Ş0ïÛ€¼Û<æ1>ˆÌbŞêvm „®      ˆ€®œÜ$:º«Â|ÎnÇ @ì ‘   "u–­ÿYA   ”   t¹`¶”é`f @@Ñ¨ßš'     / [U Lk  ïG     D@p   •`UË|s Àq   –œ‹"åf‹#å¬ v€  æ@Ş¬   €  d    $€æ   ŠI8  H  C€ è æH@P İÒVÅ­VEq—z…ú–lIÀ Éxç.À h†²÷Š_Xg	   8É—*&J“|€ï`l¢Õ‚ê« 9 ï	 8 [âÍÒ¢G¬³bŞ’ƒM¸K-àÀ½p€  ¸pG°¦àò÷€ `„şé+  ğ˜~—     Ö5    @¢c \ <Í`E^"	è\b´  °x À€     @‡—½Ã;£«ú8M*  ˜À  ÌÑK   €ÁIÁ4ğúÕ1v[5ö•:ÂwUö9@)
+   aÀéÁ¡t.B €”%j]ïG±‘%¥œZÃ:     4@	€M:€xP…>ßlûDq	rPot ¥Âbñ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 Âl@ Âq@Âr@:Âg@;
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000008.meta
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000007.meta
+--------------------------------------------------------------------------------
+şJÚJ                 'u.ÊS{Fÿ–d®èR      .     ^  XbûH ĞLÕ•fôØ[ñ©f.´   ĞÄxìû>¬] §–óğã€ÃŠø ˜€Ô 8
+€ì	•H    Í¯‰ä: ¸`§Ï€vŸ<Ş0ïÛ€¼Û<æ1>ˆÌbŞêvm „®      ˆ€®œÜ$:º«Â|ÎnÇ @ì ‘   "u–­ÿYA   ”   t¹`¶”é`f @@Ñ¨ßš'     / [U Lk  ïG     D@p   •`UË|s Àq   –œ‹"åf‹#å¬ v€  æ@Ş¬   €  d    $€æ   ŠI8  H  C€ è æH@P İÒVÅ­VEq—z…ú–lIÀ Éxç.À h†²÷Š_Xg	   8É—*&J“|€ï`l¢Õ‚ê« 9 ï	 8 [âÍÒ¢G¬³bŞ’ƒM¸K-àÀ½p€  ¸pG°¦àò÷€ `„şé+  ğ˜~—     Ö5    @¢c \ <Í`E^"	è\b´  °x À€     @‡—½Ã;£«ú8M*  ˜À  ÌÑK   €ÁIÁ4ğúÕ1v[5ö•:ÂwUö9@)
+   aÀéÁ¡t.B €”%j]ïG±‘%¥œZÃ:     4@	€M:€xP…>ßlûDq	rPot ¥Âbñ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 Âl@ Âq@Âr@:Âg@;
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000007.meta
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000010.meta
+--------------------------------------------------------------------------------
+şJÚJ                 rˆáö3÷’ÿıí™;Ò      $'     ^  XbûH Kl#‡´KèFŸ5Ü(À  ¤’*      >O·ƒ0Ÿ EàH   µÜ&R ê¾7¥Ö ‚s@Àêl.¬ã+ –æyf¸c] ÇQ@	Ï"  ÒKãsâ €Ë×Rä‚0  8ÒÅ¤<bÍ        ±  TÒy (°d¶0î¶Ò×8ëÓ1ú¦S§]îì`XÇ¤rS  0  Ÿ,Ìb` ®
+@=.Ø- pÀu_°àãÄ·˜K±´c ĞªLÀje ÃEÆ­QÅEÆTQC  ”A   ° >·       `ÇH Åx…ó†ctöı”c  00ã!      —›éfĞ,À¼³igœ qÀ527=ºû ´Íîj @ pÂ*şë § €2E R   €1ÒŞ€ÁÔƒ      °ï Ö«WVñşMœ¾ áü­€‹+{(”)ô/>M^9BbP,   °É²b3¹L¾w  ÂÅ¬ĞÕ&é¯ë6Î×ÁéEğX@MÓµ™€¦Ó6b  q4ìj     ,     tóŸ[ôşÛì   ù  D      ¿ Üw×;q–ŠX)k˜ŞJ“°*+)=›õ?` \  ÀåmÑ€
+p  HNpq @º8   €L $[	ú”ºšØ•½¯€¢lûFq	rPot ¥Âbñ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 Âl@ Âq@Âr@:Âg@;
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000010.meta
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000003.sst
+--------------------------------------------------------------------------------
+   P I     4R    ’:ï¦ı\òŞ´ á     ô/” ËSQ p        0     
+   ;   C
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000003.sst
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000006.meta
+--------------------------------------------------------------------------------
+şJÚJ                 :ï¦ı\òŞ´ô/” ËSQ       O      [  UbI     @       @                                    D                    lqrPot ¥Âbñ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 Âl@ Âq@Âr@:Âg@;
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/00000006.meta
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/LOG
+--------------------------------------------------------------------------------
+Time 2025-12-28T06:09:23.344568799Z
+Commit 00000010 1314 keys in 49ms 653Âµs 641ns
+FAM | META SEQ | SST SEQ         | RANGE
+  0 | 00000006 | 00000003 SST    |                        [=======================================================================]     | 3aefa6fd5cf2deb4-f42f94001fcb5351 (0 MiB, fresh)
+  1 | 00000007 | 00000001 SST    | [==================================================================================================] | 0027752eca537b46-ff16969064aee852 (0 MiB, fresh)
+  4 | 00000008 | 00000004 SST    | [==================================================================================================] | 0027752eca537b46-ff16969064aee852 (0 MiB, fresh)
+  2 | 00000009 | 00000002 SST    | [==================================================================================================] | 0027752eca537b46-ff16969064aee852 (0 MiB, fresh)
+  3 | 00000010 | 00000005 SST    | [==================================================================================================] | 007288e1f633f792-fffd03ed12993bd2 (0 MiB, fresh)
+
+END FILE: ./frontend/.next/dev/cache/turbopack/d1bd5b58/LOG
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/cache/.rscinfo
+--------------------------------------------------------------------------------
+{"encryption.key":"sxDv/x52vr7zDAAKyJ8OdaTRXZ90VqPXMUUYC1W8++o=","encryption.expire_at":1768111760561}
+END FILE: ./frontend/.next/dev/cache/.rscinfo
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/logs/next-development.log
+--------------------------------------------------------------------------------
+[00:00:02.051] Server  LOG     âœ“ Ready in 1666ms
+
+END FILE: ./frontend/.next/dev/logs/next-development.log
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/types/validator.ts
+--------------------------------------------------------------------------------
+// This file is generated automatically by Next.js
+// Do not edit this file manually
+// This file validates that all pages and layouts export the correct types
+
+import type { AppRoutes, LayoutRoutes, ParamMap } from "./routes.js"
+import type { ResolvingMetadata, ResolvingViewport } from "next/types.js"
+
+type AppPageConfig<Route extends AppRoutes = AppRoutes> = {
+  default: React.ComponentType<{ params: Promise<ParamMap[Route]> } & any> | ((props: { params: Promise<ParamMap[Route]> } & any) => React.ReactNode | Promise<React.ReactNode> | never | void | Promise<void>)
+  generateStaticParams?: (props: { params: ParamMap[Route] }) => Promise<any[]> | any[]
+  generateMetadata?: (
+    props: { params: Promise<ParamMap[Route]> } & any,
+    parent: ResolvingMetadata
+  ) => Promise<any> | any
+  generateViewport?: (
+    props: { params: Promise<ParamMap[Route]> } & any,
+    parent: ResolvingViewport
+  ) => Promise<any> | any
+  metadata?: any
+  viewport?: any
+}
+
+type LayoutConfig<Route extends LayoutRoutes = LayoutRoutes> = {
+  default: React.ComponentType<LayoutProps<Route>> | ((props: LayoutProps<Route>) => React.ReactNode | Promise<React.ReactNode> | never | void | Promise<void>)
+  generateStaticParams?: (props: { params: ParamMap[Route] }) => Promise<any[]> | any[]
+  generateMetadata?: (
+    props: { params: Promise<ParamMap[Route]> } & any,
+    parent: ResolvingMetadata
+  ) => Promise<any> | any
+  generateViewport?: (
+    props: { params: Promise<ParamMap[Route]> } & any,
+    parent: ResolvingViewport
+  ) => Promise<any> | any
+  metadata?: any
+  viewport?: any
+}
+
+
+// Validate ../../../src/app/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/">> = Specific
+  const handler = {} as typeof import("../../../src/app/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+
+
+
+
+
+
+// Validate ../../../src/app/layout.tsx
+{
+  type __IsExpected<Specific extends LayoutConfig<"/">> = Specific
+  const handler = {} as typeof import("../../../src/app/layout.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+END FILE: ./frontend/.next/dev/types/validator.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/types/cache-life.d.ts
+--------------------------------------------------------------------------------
+// Type definitions for Next.js cacheLife configs
+
+declare module 'next/cache' {
+  export { unstable_cache } from 'next/dist/server/web/spec-extension/unstable-cache'
+  export {
+    updateTag,
+    revalidateTag,
+    revalidatePath,
+    refresh,
+  } from 'next/dist/server/web/spec-extension/revalidate'
+  export { unstable_noStore } from 'next/dist/server/web/spec-extension/unstable-no-store'
+
+  
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"default"` profile.
+     * ```
+     *   stale:      300 seconds (5 minutes)
+     *   revalidate: 900 seconds (15 minutes)
+     *   expire:     never
+     * ```
+     * 
+     * This cache may be stale on clients for 5 minutes before checking with the server.
+     * If the server receives a new request after 15 minutes, start revalidating new values in the background.
+     * It lives for the maximum age of the server cache. If this entry has no traffic for a while, it may serve an old value the next request.
+     */
+    export function cacheLife(profile: "default"): void
+    
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"seconds"` profile.
+     * ```
+     *   stale:      30 seconds
+     *   revalidate: 1 seconds
+     *   expire:     60 seconds (1 minute)
+     * ```
+     * 
+     * This cache may be stale on clients for 30 seconds before checking with the server.
+     * If the server receives a new request after 1 seconds, start revalidating new values in the background.
+     * If this entry has no traffic for 1 minute it will expire. The next request will recompute it.
+     */
+    export function cacheLife(profile: "seconds"): void
+    
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"minutes"` profile.
+     * ```
+     *   stale:      300 seconds (5 minutes)
+     *   revalidate: 60 seconds (1 minute)
+     *   expire:     3600 seconds (1 hour)
+     * ```
+     * 
+     * This cache may be stale on clients for 5 minutes before checking with the server.
+     * If the server receives a new request after 1 minute, start revalidating new values in the background.
+     * If this entry has no traffic for 1 hour it will expire. The next request will recompute it.
+     */
+    export function cacheLife(profile: "minutes"): void
+    
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"hours"` profile.
+     * ```
+     *   stale:      300 seconds (5 minutes)
+     *   revalidate: 3600 seconds (1 hour)
+     *   expire:     86400 seconds (1 day)
+     * ```
+     * 
+     * This cache may be stale on clients for 5 minutes before checking with the server.
+     * If the server receives a new request after 1 hour, start revalidating new values in the background.
+     * If this entry has no traffic for 1 day it will expire. The next request will recompute it.
+     */
+    export function cacheLife(profile: "hours"): void
+    
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"days"` profile.
+     * ```
+     *   stale:      300 seconds (5 minutes)
+     *   revalidate: 86400 seconds (1 day)
+     *   expire:     604800 seconds (1 week)
+     * ```
+     * 
+     * This cache may be stale on clients for 5 minutes before checking with the server.
+     * If the server receives a new request after 1 day, start revalidating new values in the background.
+     * If this entry has no traffic for 1 week it will expire. The next request will recompute it.
+     */
+    export function cacheLife(profile: "days"): void
+    
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"weeks"` profile.
+     * ```
+     *   stale:      300 seconds (5 minutes)
+     *   revalidate: 604800 seconds (1 week)
+     *   expire:     2592000 seconds (1 month)
+     * ```
+     * 
+     * This cache may be stale on clients for 5 minutes before checking with the server.
+     * If the server receives a new request after 1 week, start revalidating new values in the background.
+     * If this entry has no traffic for 1 month it will expire. The next request will recompute it.
+     */
+    export function cacheLife(profile: "weeks"): void
+    
+    /**
+     * Cache this `"use cache"` for a timespan defined by the `"max"` profile.
+     * ```
+     *   stale:      300 seconds (5 minutes)
+     *   revalidate: 2592000 seconds (1 month)
+     *   expire:     31536000 seconds (365 days)
+     * ```
+     * 
+     * This cache may be stale on clients for 5 minutes before checking with the server.
+     * If the server receives a new request after 1 month, start revalidating new values in the background.
+     * If this entry has no traffic for 365 days it will expire. The next request will recompute it.
+     */
+    export function cacheLife(profile: "max"): void
+    
+    /**
+     * Cache this `"use cache"` using a custom timespan.
+     * ```
+     *   stale: ... // seconds
+     *   revalidate: ... // seconds
+     *   expire: ... // seconds
+     * ```
+     *
+     * This is similar to Cache-Control: max-age=`stale`,s-max-age=`revalidate`,stale-while-revalidate=`expire-revalidate`
+     *
+     * If a value is left out, the lowest of other cacheLife() calls or the default, is used instead.
+     */
+    export function cacheLife(profile: {
+      /**
+       * This cache may be stale on clients for ... seconds before checking with the server.
+       */
+      stale?: number,
+      /**
+       * If the server receives a new request after ... seconds, start revalidating new values in the background.
+       */
+      revalidate?: number,
+      /**
+       * If this entry has no traffic for ... seconds it will expire. The next request will recompute it.
+       */
+      expire?: number
+    }): void
+  
+
+  import { cacheTag } from 'next/dist/server/use-cache/cache-tag'
+  export { cacheTag }
+
+  export const unstable_cacheTag: typeof cacheTag
+  export const unstable_cacheLife: typeof cacheLife
+}
+
+END FILE: ./frontend/.next/dev/types/cache-life.d.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/types/routes.d.ts
+--------------------------------------------------------------------------------
+// This file is generated automatically by Next.js
+// Do not edit this file manually
+
+type AppRoutes = "/"
+type PageRoutes = never
+type LayoutRoutes = "/"
+type RedirectRoutes = never
+type RewriteRoutes = never
+type Routes = AppRoutes | PageRoutes | LayoutRoutes | RedirectRoutes | RewriteRoutes
+
+
+interface ParamMap {
+  "/": {}
+}
+
+
+export type ParamsOf<Route extends Routes> = ParamMap[Route]
+
+interface LayoutSlotMap {
+  "/": never
+}
+
+
+export type { AppRoutes, PageRoutes, LayoutRoutes, RedirectRoutes, RewriteRoutes, ParamMap }
+
+declare global {
+  /**
+   * Props for Next.js App Router page components
+   * @example
+   * ```tsx
+   * export default function Page(props: PageProps<'/blog/[slug]'>) {
+   *   const { slug } = await props.params
+   *   return <div>Blog post: {slug}</div>
+   * }
+   * ```
+   */
+  interface PageProps<AppRoute extends AppRoutes> {
+    params: Promise<ParamMap[AppRoute]>
+    searchParams: Promise<Record<string, string | string[] | undefined>>
+  }
+
+  /**
+   * Props for Next.js App Router layout components
+   * @example
+   * ```tsx
+   * export default function Layout(props: LayoutProps<'/dashboard'>) {
+   *   return <div>{props.children}</div>
+   * }
+   * ```
+   */
+  type LayoutProps<LayoutRoute extends LayoutRoutes> = {
+    params: Promise<ParamMap[LayoutRoute]>
+    children: React.ReactNode
+  } & {
+    [K in LayoutSlotMap[LayoutRoute]]: React.ReactNode
+  }
+}
+
+END FILE: ./frontend/.next/dev/types/routes.d.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/static/development/_ssgManifest.js
+--------------------------------------------------------------------------------
+self.__SSG_MANIFEST=new Set;self.__SSG_MANIFEST_CB&&self.__SSG_MANIFEST_CB()
+END FILE: ./frontend/.next/dev/static/development/_ssgManifest.js
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/static/development/_clientMiddlewareManifest.json
+--------------------------------------------------------------------------------
+[]
+END FILE: ./frontend/.next/dev/static/development/_clientMiddlewareManifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/static/development/_buildManifest.js
+--------------------------------------------------------------------------------
+self.__BUILD_MANIFEST = {
+  "__rewrites": {
+    "afterFiles": [],
+    "beforeFiles": [],
+    "fallback": []
+  },
+  "sortedPages": [
+    "/_app",
+    "/_error"
+  ]
+};self.__BUILD_MANIFEST_CB && self.__BUILD_MANIFEST_CB()
+END FILE: ./frontend/.next/dev/static/development/_buildManifest.js
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/next-font-manifest.json
+--------------------------------------------------------------------------------
+{
+  "app": {},
+  "appUsingSizeAdjust": false,
+  "pages": {},
+  "pagesUsingSizeAdjust": false
+}
+END FILE: ./frontend/.next/dev/server/next-font-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/middleware-build-manifest.js
+--------------------------------------------------------------------------------
+globalThis.__BUILD_MANIFEST = {
+  "pages": {
+    "/_app": []
+  },
+  "devFiles": [],
+  "polyfillFiles": [],
+  "lowPriorityFiles": [],
+  "rootMainFiles": []
+};
+globalThis.__BUILD_MANIFEST.lowPriorityFiles = [
+"/static/" + process.env.__NEXT_BUILD_ID + "/_buildManifest.js",
+"/static/" + process.env.__NEXT_BUILD_ID + "/_ssgManifest.js"
+];
+END FILE: ./frontend/.next/dev/server/middleware-build-manifest.js
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/interception-route-rewrite-manifest.js
+--------------------------------------------------------------------------------
+self.__INTERCEPTION_ROUTE_REWRITE_MANIFEST="[]";
+END FILE: ./frontend/.next/dev/server/interception-route-rewrite-manifest.js
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/server-reference-manifest.js
+--------------------------------------------------------------------------------
+self.__RSC_SERVER_MANIFEST="{\n  \"node\": {},\n  \"edge\": {},\n  \"encryptionKey\": \"sxDv/x52vr7zDAAKyJ8OdaTRXZ90VqPXMUUYC1W8++o=\"\n}"
+END FILE: ./frontend/.next/dev/server/server-reference-manifest.js
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/middleware-manifest.json
+--------------------------------------------------------------------------------
+{
+  "version": 3,
+  "middleware": {},
+  "sortedMiddleware": [],
+  "functions": {}
+}
+END FILE: ./frontend/.next/dev/server/middleware-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/pages-manifest.json
+--------------------------------------------------------------------------------
+{}
+END FILE: ./frontend/.next/dev/server/pages-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/next-font-manifest.js
+--------------------------------------------------------------------------------
+self.__NEXT_FONT_MANIFEST="{\n  \"app\": {},\n  \"appUsingSizeAdjust\": false,\n  \"pages\": {},\n  \"pagesUsingSizeAdjust\": false\n}"
+END FILE: ./frontend/.next/dev/server/next-font-manifest.js
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/server-reference-manifest.json
+--------------------------------------------------------------------------------
+{
+  "node": {},
+  "edge": {},
+  "encryptionKey": "sxDv/x52vr7zDAAKyJ8OdaTRXZ90VqPXMUUYC1W8++o="
+}
+END FILE: ./frontend/.next/dev/server/server-reference-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/server/app-paths-manifest.json
+--------------------------------------------------------------------------------
+{}
+END FILE: ./frontend/.next/dev/server/app-paths-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/build-manifest.json
+--------------------------------------------------------------------------------
+{
+  "pages": {
+    "/_app": []
+  },
+  "devFiles": [],
+  "polyfillFiles": [],
+  "lowPriorityFiles": [
+    "static/development/_ssgManifest.js",
+    "static/development/_buildManifest.js"
+  ],
+  "rootMainFiles": []
+}
+END FILE: ./frontend/.next/dev/build-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/prerender-manifest.json
+--------------------------------------------------------------------------------
+{
+  "version": 4,
+  "routes": {},
+  "dynamicRoutes": {},
+  "notFoundRoutes": [],
+  "preview": {
+    "previewModeId": "111f97b141f6ae885a5f6da556f541df",
+    "previewModeSigningKey": "8e1287225b0149773701da927d037b9eef03e46c68207f6d3fe42664e2fa006f",
+    "previewModeEncryptionKey": "008ad8d0d3bc00ac592c305812a10ed3e7faf41cf0c6b7a73a89f0e2d5cc8290"
+  }
+}
+END FILE: ./frontend/.next/dev/prerender-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/fallback-build-manifest.json
+--------------------------------------------------------------------------------
+{
+  "pages": {
+    "/_app": []
+  },
+  "devFiles": [],
+  "polyfillFiles": [],
+  "lowPriorityFiles": [
+    "static/development/_ssgManifest.js",
+    "static/development/_buildManifest.js"
+  ],
+  "rootMainFiles": []
+}
+END FILE: ./frontend/.next/dev/fallback-build-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/routes-manifest.json
+--------------------------------------------------------------------------------
+{"version":3,"caseSensitive":false,"basePath":"","rewrites":{"beforeFiles":[],"afterFiles":[],"fallback":[]},"redirects":[{"source":"/:path+/","destination":"/:path+","permanent":true,"internal":true,"priority":true,"regex":"^(?:\\/((?:[^\\/]+?)(?:\\/(?:[^\\/]+?))*))\\/$"}],"headers":[]}
+END FILE: ./frontend/.next/dev/routes-manifest.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.next/dev/package.json
+--------------------------------------------------------------------------------
+{
+  "type": "commonjs"
+}
+END FILE: ./frontend/.next/dev/package.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/pnpm-workspace.yaml
+--------------------------------------------------------------------------------
+packages:
+  - .
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+
+END FILE: ./frontend/pnpm-workspace.yaml
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/next-env.d.ts
+--------------------------------------------------------------------------------
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+import "./.next/dev/types/routes.d.ts";
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+
+END FILE: ./frontend/next-env.d.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/next.config.ts
+--------------------------------------------------------------------------------
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+  reactCompiler: true,
+};
+
+export default nextConfig;
+
+END FILE: ./frontend/next.config.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/.gitignore
+--------------------------------------------------------------------------------
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+END FILE: ./frontend/.gitignore
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/postcss.config.mjs
+--------------------------------------------------------------------------------
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+
+export default config;
+
+END FILE: ./frontend/postcss.config.mjs
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/eslint.config.mjs
+--------------------------------------------------------------------------------
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+  ]),
+]);
+
+export default eslintConfig;
+
+END FILE: ./frontend/eslint.config.mjs
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/public/window.svg
+--------------------------------------------------------------------------------
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
+END FILE: ./frontend/public/window.svg
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/public/vercel.svg
+--------------------------------------------------------------------------------
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1155 1000"><path d="m577.3 0 577.4 1000H0z" fill="#fff"/></svg>
+END FILE: ./frontend/public/vercel.svg
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/public/next.svg
+--------------------------------------------------------------------------------
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 394 80"><path fill="#000" d="M262 0h68.5v12.7h-27.2v66.6h-13.6V12.7H262V0ZM149 0v12.7H94v20.4h44.3v12.6H94v21h55v12.6H80.5V0h68.7zm34.3 0h-17.8l63.8 79.4h17.9l-32-39.7 32-39.6h-17.9l-23 28.6-23-28.6zm18.3 56.7-9-11-27.1 33.7h17.8l18.3-22.7z"/><path fill="#000" d="M81 79.3 17 0H0v79.3h13.6V17l50.2 62.3H81Zm252.6-.4c-1 0-1.8-.4-2.5-1s-1.1-1.6-1.1-2.6.3-1.8 1-2.5 1.6-1 2.6-1 1.8.3 2.5 1a3.4 3.4 0 0 1 .6 4.3 3.7 3.7 0 0 1-3 1.8zm23.2-33.5h6v23.3c0 2.1-.4 4-1.3 5.5a9.1 9.1 0 0 1-3.8 3.5c-1.6.8-3.5 1.3-5.7 1.3-2 0-3.7-.4-5.3-1s-2.8-1.8-3.7-3.2c-.9-1.3-1.4-3-1.4-5h6c.1.8.3 1.6.7 2.2s1 1.2 1.6 1.5c.7.4 1.5.5 2.4.5 1 0 1.8-.2 2.4-.6a4 4 0 0 0 1.6-1.8c.3-.8.5-1.8.5-3V45.5zm30.9 9.1a4.4 4.4 0 0 0-2-3.3 7.5 7.5 0 0 0-4.3-1.1c-1.3 0-2.4.2-3.3.5-.9.4-1.6 1-2 1.6a3.5 3.5 0 0 0-.3 4c.3.5.7.9 1.3 1.2l1.8 1 2 .5 3.2.8c1.3.3 2.5.7 3.7 1.2a13 13 0 0 1 3.2 1.8 8.1 8.1 0 0 1 3 6.5c0 2-.5 3.7-1.5 5.1a10 10 0 0 1-4.4 3.5c-1.8.8-4.1 1.2-6.8 1.2-2.6 0-4.9-.4-6.8-1.2-2-.8-3.4-2-4.5-3.5a10 10 0 0 1-1.7-5.6h6a5 5 0 0 0 3.5 4.6c1 .4 2.2.6 3.4.6 1.3 0 2.5-.2 3.5-.6 1-.4 1.8-1 2.4-1.7a4 4 0 0 0 .8-2.4c0-.9-.2-1.6-.7-2.2a11 11 0 0 0-2.1-1.4l-3.2-1-3.8-1c-2.8-.7-5-1.7-6.6-3.2a7.2 7.2 0 0 1-2.4-5.7 8 8 0 0 1 1.7-5 10 10 0 0 1 4.3-3.5c2-.8 4-1.2 6.4-1.2 2.3 0 4.4.4 6.2 1.2 1.8.8 3.2 2 4.3 3.4 1 1.4 1.5 3 1.5 5h-5.8z"/></svg>
+END FILE: ./frontend/public/next.svg
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/public/globe.svg
+--------------------------------------------------------------------------------
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g clip-path="url(#a)"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.27 14.1a6.5 6.5 0 0 0 3.67-3.45q-1.24.21-2.7.34-.31 1.83-.97 3.1M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m.48-1.52a7 7 0 0 1-.96 0H7.5a4 4 0 0 1-.84-1.32q-.38-.89-.63-2.08a40 40 0 0 0 3.92 0q-.25 1.2-.63 2.08a4 4 0 0 1-.84 1.31zm2.94-4.76q1.66-.15 2.95-.43a7 7 0 0 0 0-2.58q-1.3-.27-2.95-.43a18 18 0 0 1 0 3.44m-1.27-3.54a17 17 0 0 1 0 3.64 39 39 0 0 1-4.3 0 17 17 0 0 1 0-3.64 39 39 0 0 1 4.3 0m1.1-1.17q1.45.13 2.69.34a6.5 6.5 0 0 0-3.67-3.44q.65 1.26.98 3.1M8.48 1.5l.01.02q.41.37.84 1.31.38.89.63 2.08a40 40 0 0 0-3.92 0q.25-1.2.63-2.08a4 4 0 0 1 .85-1.32 7 7 0 0 1 .96 0m-2.75.4a6.5 6.5 0 0 0-3.67 3.44 29 29 0 0 1 2.7-.34q.31-1.83.97-3.1M4.58 6.28q-1.66.16-2.95.43a7 7 0 0 0 0 2.58q1.3.27 2.95.43a18 18 0 0 1 0-3.44m.17 4.71q-1.45-.12-2.69-.34a6.5 6.5 0 0 0 3.67 3.44q-.65-1.27-.98-3.1" fill="#666"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h16v16H0z"/></clipPath></defs></svg>
+END FILE: ./frontend/public/globe.svg
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/public/file.svg
+--------------------------------------------------------------------------------
+<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
+END FILE: ./frontend/public/file.svg
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/tsconfig.json
+--------------------------------------------------------------------------------
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+
+END FILE: ./frontend/tsconfig.json
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/src/app/globals.css
+--------------------------------------------------------------------------------
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+END FILE: ./frontend/src/app/globals.css
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/src/app/layout.tsx
+--------------------------------------------------------------------------------
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        {children}
+      </body>
+    </html>
+  );
+}
+
+END FILE: ./frontend/src/app/layout.tsx
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/src/app/page.tsx
+--------------------------------------------------------------------------------
+import { db } from '@/lib/db';
+import { users, posts } from '@/lib/schema';
+import { desc } from 'drizzle-orm';
+
+export const dynamic = 'force-dynamic';
+
+export default async function Home() {
+  const allUsers = await db.select().from(users).orderBy(desc(users.createdAt));
+  const allPosts = await db.select().from(posts).orderBy(desc(posts.lastScraped));
+
+  return (
+    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-8 font-sans">
+      <div className="max-w-6xl mx-auto space-y-12">
+        
+        {/* Header */}
+        <header className="flex justify-between items-center border-b border-neutral-800 pb-6">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-500 bg-clip-text text-transparent">
+              Connor Bot Command
+            </h1>
+            <p className="text-neutral-500 mt-2">Unified Surveillance & Telegram System</p>
+          </div>
+          <div className="flex gap-4">
+             <div className="bg-neutral-900 px-6 py-3 rounded-xl border border-neutral-800">
+                <span className="text-2xl font-bold text-white block">{allUsers.length}</span>
+                <span className="text-xs text-neutral-500 uppercase font-bold">Users</span>
+             </div>
+             <div className="bg-neutral-900 px-6 py-3 rounded-xl border border-neutral-800">
+                <span className="text-2xl font-bold text-white block">{allPosts.length}</span>
+                <span className="text-xs text-neutral-500 uppercase font-bold">Scraped Posts</span>
+             </div>
+          </div>
+        </header>
+
+        {/* X-Observer Section */}
+        <section>
+          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
+            <span>ğŸ“¡</span> Live Feed
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {allPosts.map((post) => (
+              <div key={post.id} className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 hover:border-emerald-500/50 transition-colors">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-emerald-900 flex items-center justify-center font-bold text-emerald-400">
+                      {post.author?.[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">@{post.author}</p>
+                      <p className="text-xs text-neutral-500">ID: {post.id}</p>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-neutral-300 text-sm mb-6 line-clamp-3 leading-relaxed">
+                  {post.content}
+                </p>
+                <div className="grid grid-cols-4 gap-2 text-xs font-mono text-neutral-500 border-t border-neutral-800 pt-4">
+                  <div className="text-center">
+                    <span className="block text-emerald-400 font-bold text-lg">{post.likes}</span>
+                    LIKES
+                  </div>
+                  <div className="text-center">
+                    <span className="block text-blue-400 font-bold text-lg">{post.reposts}</span>
+                    REPOSTS
+                  </div>
+                  <div className="text-center">
+                    <span className="block text-purple-400 font-bold text-lg">{post.replies}</span>
+                    REPLIES
+                  </div>
+                  <div className="text-center">
+                    <span className="block text-orange-400 font-bold text-lg">{post.views}</span>
+                    VIEWS
+                  </div>
+                </div>
+              </div>
+            ))}
+            {allPosts.length === 0 && (
+              <div className="col-span-full py-12 text-center text-neutral-600 bg-neutral-900/30 rounded-xl border border-neutral-800 border-dashed">
+                Waiting for scraper data... Start it from Telegram!
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+END FILE: ./frontend/src/app/page.tsx
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/src/lib/db.ts
+--------------------------------------------------------------------------------
+import { createClient } from '@libsql/client';
+import { drizzle } from 'drizzle-orm/libsql';
+import * as schema from './schema';
+
+// Docker Volume Path is the source of truth
+const url = process.env.DATABASE_URL || 'file:../backend/bot.db';
+
+const client = createClient({ url });
+export const db = drizzle(client, { schema });
+
+END FILE: ./frontend/src/lib/db.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/src/lib/schema.ts
+--------------------------------------------------------------------------------
+import { sqliteTable, int, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// --- TELEGRAM USERS ---
+export const users = sqliteTable('users', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  telegramId: int('telegram_id').unique().notNull(),
+  username: text('username'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isActive: int('is_active', { mode: 'boolean' }).default(true),
+});
+
+// --- SCRAPED POSTS ---
+export const posts = sqliteTable('posts', {
+  id: text('id').primaryKey(), // The X Post ID
+  content: text('content'),
+  author: text('author').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastScraped: text('last_scraped'),
+  
+  // Metrics
+  views: int('views').default(0),
+  likes: int('likes').default(0),
+  reposts: int('reposts').default(0),
+  replies: int('replies').default(0),
+});
+
+// --- METRIC SNAPSHOTS (History) ---
+export const snapshots = sqliteTable('snapshots', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+  timestamp: text('timestamp').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  
+  views: int('views'),
+  likes: int('likes'),
+  reposts: int('reposts'),
+  replies: int('replies'),
+});
+
+END FILE: ./frontend/src/lib/schema.ts
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/README.md
+--------------------------------------------------------------------------------
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+END FILE: ./frontend/README.md
+
+--------------------------------------------------------------------------------
+START FILE: ./frontend/package.json
+--------------------------------------------------------------------------------
+{
+  "name": "frontend",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "docker:build": "docker build -t connor-frontend ."
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "@radix-ui/react-icons": "^1.3.2",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "1.0.0-beta.6-ea4d663",
+    "next": "16.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "recharts": "^3.6.0",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/node": "^25.0.3",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.4.23",
+    "drizzle-kit": "1.0.0-beta.6-ea4d663",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "16.1.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3"
+  }
+}
+
+END FILE: ./frontend/package.json
+
+--------------------------------------------------------------------------------
+START FILE: ./package.json
+--------------------------------------------------------------------------------
+{
+  "name": "connor-bot-monorepo",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n \"DOCKER,BACKEND,FRONTEND\" -c \"blue,green,magenta\" \"docker compose up\" \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "build": "pnpm -r build",
+    "db:push": "pnpm --filter backend db:push",
+    "db:migrate": "pnpm --filter backend db:migrate",
+    "playwright:install": "pnpm --filter scraper playwright:install",
+    "docker:build": "pnpm -r docker:build",
+    "docker:up": "docker-compose up --build",
+    "docker:down": "docker-compose down",
+    "clean": "rm -rf node_modules */node_modules */dist */build",
+    "reinstall": "pnpm clean && pnpm install",
+    "full-upgrade": "./upgrade-system.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
+END FILE: ./package.json

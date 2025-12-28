@@ -1,20 +1,20 @@
 import { Worker } from 'bullmq';
 import { ScraperService } from './core/scraper.js';
 
+// --- PROXY CHECK & PAUSE LOGIC ---
 const checkProxy = () => {
   if (!process.env.PROXY_URL) {
-    console.warn("⚠️  WARNING: PROXY_URL is missing.");
+    console.warn("\n⚠️  WARNING: PROXY_URL is missing.");
     console.warn("⏸️  Scraper is PAUSED. Waiting for configuration...");
-    console.warn("👉  Add PROXY_URL to your docker-compose.yml or .env file and restart.");
+    console.warn("👉  To fix: Add PROXY_URL to your docker-compose.yml or .env file and restart.\n");
     
-    // Keep the process alive but idle (Paused)
+    // Keep the process alive indefinitely so Docker doesn't restart it constantly
     setInterval(() => {}, 60000); 
     return false;
   }
   return true;
 };
 
-// Start logic
 if (checkProxy()) {
   const REDIS_CONFIG = {
     host: process.env.REDIS_HOST || 'localhost',
@@ -40,7 +40,6 @@ if (checkProxy()) {
     console.error(`❌ Job ${job?.id} failed:`, err);
   });
 
-  // Handle graceful shutdown
   process.on('SIGTERM', async () => {
     await worker.close();
     process.exit(0);
