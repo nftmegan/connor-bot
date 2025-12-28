@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # 1. Redis (Job Queue)
+  redis:
+    image: redis:alpine
+    container_name: bot_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Backend (Telegram Bot)
+  backend:
+    build: ./backend
+    container_name: bot_backend
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: ./backend/.env
+    environment:
+      - DATABASE_URL=file:/app/data/bot.db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=production
+    volumes:
+      - sqlite_data:/app/data
+
+  # 3. Scraper (Node.js Worker)
+  scraper:
+    build: ./scraper
+    container_name: bot_scraper
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=file:/app/data/bot.db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - HEADLESS=true
+    volumes:
+      - ./scraper/sessions:/app/sessions
+      - sqlite_data:/app/data
+
+  # 4. Frontend (Dashboard)
+  frontend:
+    build: ./frontend
+    container_name: bot_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:/app/data/bot.db
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+    volumes:
+      - sqlite_data:/app/data
+
+volumes:
+  redis_data:
+  sqlite_data:

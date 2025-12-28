@@ -1,0 +1,1360 @@
+Project Context - Generated on Sun 28 Dec 04:33:19 WET 2025
+
+==========================================
+PROJECT STRUCTURE
+==========================================
+.
+./bundle.sh
+./project_context.txt
+./backend
+./backend/drizzle.config.ts
+./backend/bot.db
+./backend/tsconfig.json
+./backend/src
+./backend/src/modules
+./backend/src/modules/users
+./backend/src/modules/scraper
+./backend/src/modules/crypto
+./backend/src/index.ts
+./backend/src/db
+./backend/src/bot.ts
+./backend/src/bot
+./backend/src/bot/menus.ts
+./backend/src/bot/bot.ts
+./backend/src/core
+./backend/src/core/db
+./backend/src/core/logger.ts
+./backend/src/core/config.ts
+./backend/Dockerfile
+./backend/package.json
+./pnpm-workspace.yaml
+./pnpm-lock.yaml
+./docker-compose.yml
+./scraper
+./scraper/sessions
+./scraper/tsconfig.json
+./scraper/src
+./scraper/src/index.ts
+./scraper/src/queue
+./scraper/src/utils
+./scraper/src/db.ts
+./scraper/src/schema.ts
+./scraper/src/core
+./scraper/src/core/scraper.ts
+./scraper/src/core/browser.ts
+./scraper/Dockerfile
+./scraper/package.json
+./frontend
+./frontend/pnpm-workspace.yaml
+./frontend/next-env.d.ts
+./frontend/next.config.ts
+./frontend/postcss.config.mjs
+./frontend/eslint.config.mjs
+./frontend/public
+./frontend/public/window.svg
+./frontend/public/vercel.svg
+./frontend/public/next.svg
+./frontend/public/globe.svg
+./frontend/public/file.svg
+./frontend/tsconfig.json
+./frontend/src
+./frontend/src/app
+./frontend/src/app/globals.css
+./frontend/src/app/layout.tsx
+./frontend/src/app/page.tsx
+./frontend/src/app/favicon.ico
+./frontend/src/lib
+./frontend/src/lib/db.ts
+./frontend/src/lib/schema.ts
+./frontend/README.md
+./frontend/package.json
+./package.json
+
+
+
+==========================================
+FILE: ./backend/drizzle.config.ts
+==========================================
+import { defineConfig } from 'drizzle-kit';
+import 'dotenv/config';
+
+export default defineConfig({
+  // UPDATED: Point to the new "core" folder
+  schema: './src/core/db/schema.ts',
+  out: './drizzle',
+  dialect: 'sqlite',
+  dbCredentials: {
+    url: process.env.DATABASE_URL || 'file:bot.db',
+  },
+});
+
+
+
+==========================================
+FILE: ./backend/.env
+==========================================
+BOT_TOKEN=8519377910:AAE3FQs_pvy4VXU5rRBHxqePo585x9TSXnY
+
+
+==========================================
+FILE: ./backend/package.json
+==========================================
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "db:push": "drizzle-kit push",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@grammyjs/menu": "^1.3.1",
+    "@libsql/client": "^0.6.0",
+    "bullmq": "^5.66.4",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.45.1",
+    "grammy": "^1.22.4",
+    "ioredis": "^5.8.2",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.3",
+    "playwright": "^1.57.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "drizzle-kit": "^0.31.8",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}
+
+
+==========================================
+FILE: ./backend/src/bot/bot.ts
+==========================================
+import { Bot, Context } from 'grammy';
+import { config } from '../core/config.js';
+import { logger } from '../core/logger.js';
+import { UsersService } from '../modules/users/users.service.js';
+import { mainMenu } from './menus.js';
+
+// Define Custom Context if needed later
+export type MyContext = Context;
+
+export const bot = new Bot<MyContext>(config.BOT_TOKEN);
+
+// 1. Install Plugins
+bot.use(mainMenu);
+
+// 2. Commands
+bot.command('start', async (ctx) => {
+  if (ctx.from?.id) {
+    await UsersService.register(ctx.from.id, ctx.from.username);
+  }
+  await ctx.reply('🚀 **Welcome to Connor Bot!**\n\nYou are now subscribed to Solana updates.', {
+    parse_mode: 'Markdown',
+    reply_markup: mainMenu,
+  });
+});
+
+// 3. Error Handling
+bot.catch((err) => {
+  logger.error({ err }, 'Global Bot Error');
+});
+
+
+
+==========================================
+FILE: ./backend/src/bot/menus.ts
+==========================================
+import { Menu } from '@grammyjs/menu';
+import { PriceService } from '../modules/crypto/price.service.js';
+import { QueueService } from '../modules/queue/queue.producer.js';
+
+export const mainMenu = new Menu('main-menu')
+  .text('💰 SOL Price', async (ctx) => {
+    const price = await PriceService.fetchSolanaPrice();
+    await ctx.reply(price ? `💎 SOL: **$${price}**` : '⚠️ Error', { parse_mode: 'Markdown' });
+  })
+  .row()
+  .text('🟢 Start Tracking @elonmusk', async (ctx) => {
+    await QueueService.addScrapeJob('elonmusk');
+    await ctx.reply('🕵️ Tracking started for **@elonmusk**.', { parse_mode: 'Markdown' });
+  })
+  .text('🔴 Stop Tracking', async (ctx) => {
+    await QueueService.stopScrapeJob('elonmusk');
+    await ctx.reply('🛑 Tracking stopped.');
+  })
+  .row()
+  .text('ℹ️ Status', (ctx) => ctx.reply('✅ Bot & Scraper Online.'));
+
+
+
+==========================================
+FILE: ./backend/src/bot.ts
+==========================================
+import { Bot } from 'grammy';
+import { config } from './config.js';
+import { StoreService } from './services/store.service.js';
+
+export const bot = new Bot(config.botToken);
+
+bot.command('start', async (ctx) => {
+  if (ctx.from?.id) {
+    await StoreService.registerUser(ctx.from.id, ctx.from.username);
+  }
+  await ctx.reply('Welcome! You are now registered to receive updates.');
+});
+
+bot.on('message:text', async (ctx) => {
+  await ctx.reply(`You said: ${ctx.message.text}`);
+});
+
+
+==========================================
+FILE: ./backend/src/core/config.ts
+==========================================
+import { z } from 'zod';
+import 'dotenv/config';
+
+const envSchema = z.object({
+  BOT_TOKEN: z.string().min(1, "Bot Token is required"),
+  DATABASE_URL: z.string().default("file:bot.db"),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+});
+
+const processEnv = envSchema.safeParse(process.env);
+
+if (!processEnv.success) {
+  console.error("❌ Invalid environment variables:", processEnv.error.format());
+  process.exit(1);
+}
+
+export const config = processEnv.data;
+
+
+
+==========================================
+FILE: ./backend/src/core/db/index.ts
+==========================================
+import { drizzle } from 'drizzle-orm/libsql';
+import { createClient } from '@libsql/client';
+import { config } from '../config.js';
+import * as schema from './schema.js';
+
+const client = createClient({
+  url: config.DATABASE_URL,
+});
+
+export const db = drizzle(client, { schema });
+
+
+
+==========================================
+FILE: ./backend/src/core/db/schema.ts
+==========================================
+import { sqliteTable, int, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// --- TELEGRAM USERS ---
+export const users = sqliteTable('users', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  telegramId: int('telegram_id').unique().notNull(),
+  username: text('username'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isActive: int('is_active', { mode: 'boolean' }).default(true),
+});
+
+// --- SCRAPED POSTS ---
+export const posts = sqliteTable('posts', {
+  id: text('id').primaryKey(), // The X Post ID
+  content: text('content'),
+  author: text('author').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastScraped: text('last_scraped'),
+  
+  // Metrics
+  views: int('views').default(0),
+  likes: int('likes').default(0),
+  reposts: int('reposts').default(0),
+  replies: int('replies').default(0),
+});
+
+// --- METRIC SNAPSHOTS (History) ---
+export const snapshots = sqliteTable('snapshots', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+  timestamp: text('timestamp').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  
+  views: int('views'),
+  likes: int('likes'),
+  reposts: int('reposts'),
+  replies: int('replies'),
+});
+
+
+
+==========================================
+FILE: ./backend/src/core/logger.ts
+==========================================
+import pino from 'pino';
+import { config } from './config.js';
+
+export const logger = pino({
+  level: 'info',
+  transport: config.NODE_ENV === 'development' ? {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      translateTime: 'HH:MM:ss Z',
+      ignore: 'pid,hostname',
+    },
+  } : undefined,
+});
+
+
+
+==========================================
+FILE: ./backend/src/index.ts
+==========================================
+import { bot } from './bot/bot.js';
+import { config } from './core/config.js';
+import { logger } from './core/logger.js';
+import { PriceService } from './modules/crypto/price.service.js';
+import { UsersService } from './modules/users/users.service.js';
+
+class Application {
+  private intervalId: NodeJS.Timeout | null = null;
+
+  async start() {
+    logger.info('🤖 Starting Connor Bot System...');
+
+    const count = await UsersService.getCount();
+    logger.info({ userCount: count }, '📦 Database initialized');
+
+    this.startJobs();
+
+    await bot.start({
+      onStart: () => logger.info('✅ Telegram Bot Connected'),
+    });
+  }
+
+  private startJobs() {
+    logger.info('⏰ Job Scheduler: Started');
+    this.broadcastJob();
+    this.intervalId = setInterval(() => this.broadcastJob(), 60 * 1000);
+  }
+
+  private async broadcastJob() {
+    const price = await PriceService.fetchSolanaPrice();
+    if (!price) return;
+
+    const users = await UsersService.getActiveIds();
+    if (users.length === 0) return;
+
+    logger.info({ price, targetCount: users.length }, '📢 Broadcasting Update');
+
+    const message = `🚀 **Solana Update**\n\nPrice: **$${price}**`;
+    
+    await Promise.all(
+      users.map(id => 
+        bot.api.sendMessage(id, message, { parse_mode: 'Markdown' })
+          .catch(e => logger.warn({ id, error: e.message }, 'Failed to send'))
+      )
+    );
+  }
+
+  stop() {
+    if (this.intervalId) clearInterval(this.intervalId);
+    bot.stop();
+    logger.info('🛑 System Shutdown');
+  }
+}
+
+const app = new Application();
+app.start().catch(err => {
+  logger.fatal({ err }, 'Startup Failed');
+  process.exit(1);
+});
+
+process.once('SIGINT', () => app.stop());
+process.once('SIGTERM', () => app.stop());
+
+
+
+==========================================
+FILE: ./backend/src/modules/crypto/price.service.ts
+==========================================
+import { z } from 'zod';
+import { logger } from '../../core/logger.js';
+
+const BinanceTickerSchema = z.object({
+  symbol: z.string(),
+  price: z.string().transform((val) => parseFloat(val).toFixed(2)),
+});
+
+export const PriceService = {
+  fetchSolanaPrice: async (): Promise<string | null> => {
+    try {
+      const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT');
+      
+      if (!response.ok) throw new Error(`API Status: ${response.status}`);
+
+      const json = await response.json();
+      const data = BinanceTickerSchema.parse(json);
+      
+      return data.price;
+    } catch (error) {
+      logger.error({ error }, 'Failed to fetch price');
+      return null;
+    }
+  }
+};
+
+
+
+==========================================
+FILE: ./backend/src/modules/scraper/browser.engine.ts
+==========================================
+import { chromium, BrowserContext, Page } from 'playwright';
+import path from 'path';
+import fs from 'fs';
+import { logger } from '../../core/logger.js';
+
+interface BrowserConfig {
+  accountId: string;
+  headless?: boolean;
+}
+
+export class BrowserEngine {
+  private context: BrowserContext | null = null;
+  private page: Page | null = null;
+  private userDataDir: string;
+
+  constructor(private config: BrowserConfig) {
+    this.userDataDir = path.resolve(process.cwd(), 'sessions', config.accountId);
+  }
+
+  async launch(): Promise<Page> {
+    if (!fs.existsSync(this.userDataDir)) {
+      fs.mkdirSync(this.userDataDir, { recursive: true });
+    }
+
+    logger.info({ account: this.config.accountId }, '🚀 Launching Browser Engine');
+
+    this.context = await chromium.launchPersistentContext(this.userDataDir, {
+      headless: this.config.headless ?? true,
+      viewport: null,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--start-maximized',
+        '--no-sandbox',
+        '--disable-infobars',
+        '--disable-setuid-sandbox'
+      ],
+    });
+
+    this.page = this.context.pages()[0] || await this.context.newPage();
+
+    // Stealth Patch
+    await this.page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
+    return this.page;
+  }
+
+  async close() {
+    if (this.context) await this.context.close();
+  }
+}
+
+
+
+==========================================
+FILE: ./backend/src/modules/scraper/queue.service.ts
+==========================================
+import { Queue, Worker } from 'bullmq';
+import { logger } from '../../core/logger.js';
+import { ScraperService } from './scraper.service.js';
+
+const REDIS_CONFIG = {
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || '6379')
+};
+
+export const scraperQueue = new Queue('x-scraper', { connection: REDIS_CONFIG });
+
+const worker = new Worker('x-scraper', async (job) => {
+  logger.info({ target: job.data.target }, '👷 Worker Started');
+  const scraper = new ScraperService(job.data.target);
+  await scraper.scrape();
+}, { connection: REDIS_CONFIG });
+
+export const QueueService = {
+  addJob: async (target: string) => {
+    await scraperQueue.add('scrape', { target }, {
+      repeat: { every: 10 * 60 * 1000 } // Every 10 mins
+    });
+    logger.info({ target }, '⏰ Job Scheduled');
+  },
+  
+  clearJobs: async () => {
+    await scraperQueue.drain();
+    const repeatable = await scraperQueue.getRepeatableJobs();
+    for (const job of repeatable) await scraperQueue.removeRepeatableByKey(job.key);
+    logger.info('🛑 Queue Cleared');
+  }
+};
+
+
+
+==========================================
+FILE: ./backend/src/modules/scraper/scraper.service.ts
+==========================================
+import { Page } from 'playwright';
+import { BrowserEngine } from './browser.engine.js';
+import { logger } from '../../core/logger.js';
+import { db } from '../../core/db/index.js';
+import { posts, snapshots } from '../../core/db/schema.js';
+import { eq } from 'drizzle-orm';
+
+export class ScraperService {
+  private engine: BrowserEngine;
+
+  constructor(private targetAccount: string) {
+    this.engine = new BrowserEngine({ accountId: 'main_scraper' });
+  }
+
+  async scrape() {
+    logger.info(`🕵️ Starting surveillance on @${this.targetAccount}`);
+    const page = await this.engine.launch();
+
+    try {
+      await page.goto(`https://x.com/${this.targetAccount}`, { waitUntil: 'domcontentloaded' });
+      
+      // Basic login check
+      if (page.url().includes('login')) {
+        logger.warn('🔒 Login Wall detected. Manual intervention required?');
+        // Simple logic: if headless, we might fail here. 
+        // For production, you'd manage cookies better.
+      }
+
+      await page.waitForTimeout(3000);
+
+      // Scroll and Scrape
+      for (let i = 0; i < 3; i++) {
+        await page.keyboard.press('j'); // Next post
+        await page.waitForTimeout(2000);
+        await this.processActivePost(page);
+      }
+
+    } catch (error: any) {
+      logger.error({ err: error.message }, 'Scrape cycle failed');
+    } finally {
+      await this.engine.close();
+    }
+  }
+
+  private async processActivePost(page: Page) {
+    try {
+      const data = await page.evaluate(() => {
+        const article = document.querySelector('article[data-testid="tweet"]');
+        if (!article) return null;
+
+        const getText = (sel: string) => article.querySelector(sel)?.textContent || '';
+        const getMetric = (label: string) => {
+           const el = article.querySelector(`[aria-label*="${label}"]`);
+           return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
+        };
+
+        const link = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
+        const id = link?.split('/status/')[1];
+
+        if (!id) return null;
+
+        return {
+          id,
+          content: getText('[data-testid="tweetText"]'),
+          replies: getMetric('replies'),
+          reposts: getMetric('reposts'),
+          likes: getMetric('likes'),
+          views: getText('a[href*="/analytics"]'), 
+        };
+      });
+
+      if (data) await this.saveData(data);
+
+    } catch (e) { /* ignore DOM errors */ }
+  }
+
+  private async saveData(raw: any) {
+    const parse = (str: string) => {
+      if (!str) return 0;
+      let n = parseFloat(str.replace(/,/g, ''));
+      if (str.toUpperCase().includes('K')) n *= 1000;
+      if (str.toUpperCase().includes('M')) n *= 1000000;
+      return Math.floor(n);
+    };
+
+    const clean = {
+      id: raw.id,
+      content: raw.text,
+      author: this.targetAccount,
+      views: parse(raw.views),
+      likes: parse(raw.likes),
+      reposts: parse(raw.reposts),
+      replies: parse(raw.replies),
+      updatedAt: new Date().toISOString()
+    };
+
+    // Upsert Post
+    await db.insert(posts).values(clean)
+      .onConflictDoUpdate({ 
+        target: posts.id, 
+        set: { ...clean, lastScraped: new Date().toISOString() } 
+      });
+
+    // Add Snapshot
+    await db.insert(snapshots).values({
+      postId: clean.id,
+      ...clean
+    });
+
+    logger.info({ id: clean.id, likes: clean.likes }, '💾 Post Saved');
+  }
+}
+
+
+
+==========================================
+FILE: ./backend/src/modules/users/users.service.ts
+==========================================
+import { eq, sql } from 'drizzle-orm';
+import { db } from '../../core/db/index.js';
+import { users } from '../../core/db/schema.js';
+import { logger } from '../../core/logger.js';
+
+export const UsersService = {
+  register: async (telegramId: number, username?: string) => {
+    try {
+      await db.insert(users).values({
+        telegramId,
+        username,
+      }).onConflictDoUpdate({
+        target: users.telegramId,
+        set: { username, isActive: true }
+      });
+      logger.info({ telegramId }, 'User registered/updated');
+    } catch (error) {
+      logger.error({ error, telegramId }, 'Failed to register user');
+    }
+  },
+
+  getActiveIds: async () => {
+    const results = await db.query.users.findMany({
+      where: eq(users.isActive, true),
+      columns: { telegramId: true }
+    });
+    return results.map(u => u.telegramId);
+  },
+
+  getCount: async () => {
+    const [result] = await db.select({ count: sql`count(*)` }).from(users);
+    return Number(result.count);
+  }
+};
+
+
+
+==========================================
+FILE: ./backend/tsconfig.json
+==========================================
+{
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "module": "nodenext",
+    "target": "esnext",
+    "moduleResolution": "nodenext",
+    "lib": ["esnext"],
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*", "index.ts"],
+  "exclude": ["node_modules"]
+}
+
+
+==========================================
+FILE: ./frontend/next.config.ts
+==========================================
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+  reactCompiler: true,
+};
+
+export default nextConfig;
+
+
+
+==========================================
+FILE: ./frontend/next-env.d.ts
+==========================================
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+import "./.next/dev/types/routes.d.ts";
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+
+
+
+==========================================
+FILE: ./frontend/package.json
+==========================================
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.1",
+    "next": "16.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "1.0.0",
+    "drizzle-kit": "^0.31.8",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+
+
+
+==========================================
+FILE: ./frontend/pnpm-workspace.yaml
+==========================================
+packages:
+  - .
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+
+
+
+==========================================
+FILE: ./frontend/src/app/globals.css
+==========================================
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+
+
+==========================================
+FILE: ./frontend/src/app/layout.tsx
+==========================================
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        {children}
+      </body>
+    </html>
+  );
+}
+
+
+
+==========================================
+FILE: ./frontend/src/app/page.tsx
+==========================================
+import { db } from '@/lib/db';
+import { users, posts } from '@/lib/schema';
+import { desc } from 'drizzle-orm';
+
+export const dynamic = 'force-dynamic';
+
+export default async function Home() {
+  const allUsers = await db.select().from(users).orderBy(desc(users.createdAt));
+  const allPosts = await db.select().from(posts).orderBy(desc(posts.lastScraped));
+
+  return (
+    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-8 font-sans">
+      <div className="max-w-6xl mx-auto space-y-12">
+        
+        {/* Header */}
+        <header className="flex justify-between items-center border-b border-neutral-800 pb-6">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-500 bg-clip-text text-transparent">
+              Connor Bot Command
+            </h1>
+            <p className="text-neutral-500 mt-2">Unified Surveillance & Telegram System</p>
+          </div>
+          <div className="flex gap-4">
+             <div className="bg-neutral-900 px-6 py-3 rounded-xl border border-neutral-800">
+                <span className="text-2xl font-bold text-white block">{allUsers.length}</span>
+                <span className="text-xs text-neutral-500 uppercase font-bold">Users</span>
+             </div>
+             <div className="bg-neutral-900 px-6 py-3 rounded-xl border border-neutral-800">
+                <span className="text-2xl font-bold text-white block">{allPosts.length}</span>
+                <span className="text-xs text-neutral-500 uppercase font-bold">Scraped Posts</span>
+             </div>
+          </div>
+        </header>
+
+        {/* X-Observer Section */}
+        <section>
+          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
+            <span>📡</span> Live Feed
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {allPosts.map((post) => (
+              <div key={post.id} className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 hover:border-emerald-500/50 transition-colors">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-emerald-900 flex items-center justify-center font-bold text-emerald-400">
+                      {post.author?.[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">@{post.author}</p>
+                      <p className="text-xs text-neutral-500">ID: {post.id}</p>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-neutral-300 text-sm mb-6 line-clamp-3 leading-relaxed">
+                  {post.content}
+                </p>
+                <div className="grid grid-cols-4 gap-2 text-xs font-mono text-neutral-500 border-t border-neutral-800 pt-4">
+                  <div className="text-center">
+                    <span className="block text-emerald-400 font-bold text-lg">{post.likes}</span>
+                    LIKES
+                  </div>
+                  <div className="text-center">
+                    <span className="block text-blue-400 font-bold text-lg">{post.reposts}</span>
+                    REPOSTS
+                  </div>
+                  <div className="text-center">
+                    <span className="block text-purple-400 font-bold text-lg">{post.replies}</span>
+                    REPLIES
+                  </div>
+                  <div className="text-center">
+                    <span className="block text-orange-400 font-bold text-lg">{post.views}</span>
+                    VIEWS
+                  </div>
+                </div>
+              </div>
+            ))}
+            {allPosts.length === 0 && (
+              <div className="col-span-full py-12 text-center text-neutral-600 bg-neutral-900/30 rounded-xl border border-neutral-800 border-dashed">
+                Waiting for scraper data... Start it from Telegram!
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+
+
+==========================================
+FILE: ./frontend/src/lib/db.ts
+==========================================
+import { createClient } from '@libsql/client';
+import { drizzle } from 'drizzle-orm/libsql';
+import * as schema from './schema';
+
+// In Docker, this path is shared via volume at /app/data/bot.db
+const url = process.env.DATABASE_URL || 'file:../backend/bot.db';
+
+const client = createClient({ url });
+export const db = drizzle(client, { schema });
+
+
+
+==========================================
+FILE: ./frontend/src/lib/schema.ts
+==========================================
+import { sqliteTable, int, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// --- TELEGRAM USERS ---
+export const users = sqliteTable('users', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  telegramId: int('telegram_id').unique().notNull(),
+  username: text('username'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isActive: int('is_active', { mode: 'boolean' }).default(true),
+});
+
+// --- SCRAPED POSTS ---
+export const posts = sqliteTable('posts', {
+  id: text('id').primaryKey(), // The X Post ID
+  content: text('content'),
+  author: text('author').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastScraped: text('last_scraped'),
+  
+  // Metrics
+  views: int('views').default(0),
+  likes: int('likes').default(0),
+  reposts: int('reposts').default(0),
+  replies: int('replies').default(0),
+});
+
+// --- METRIC SNAPSHOTS (History) ---
+export const snapshots = sqliteTable('snapshots', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+  timestamp: text('timestamp').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  
+  views: int('views'),
+  likes: int('likes'),
+  reposts: int('reposts'),
+  replies: int('replies'),
+});
+
+
+
+==========================================
+FILE: ./frontend/tsconfig.json
+==========================================
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+
+
+
+==========================================
+FILE: ./package.json
+==========================================
+{
+  "name": "connor-bot-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "build": "pnpm -r build",
+    "db:push": "pnpm --filter backend db:push"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+
+
+==========================================
+FILE: ./pnpm-workspace.yaml
+==========================================
+packages:
+  - 'backend'
+  - 'frontend'
+  - 'scraper'
+
+
+
+==========================================
+FILE: ./scraper/package.json
+==========================================
+{
+  "name": "scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.6.0",
+    "bullmq": "^5.8.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.30.10",
+    "ioredis": "^5.4.1",
+    "playwright": "^1.44.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}
+
+
+
+==========================================
+FILE: ./scraper/src/core/browser.ts
+==========================================
+import { chromium, BrowserContext, Page } from 'playwright';
+import path from 'path';
+import fs from 'fs';
+
+export class BrowserEngine {
+  private context: BrowserContext | null = null;
+  private page: Page | null = null;
+  private userDataDir: string;
+
+  constructor(private accountId: string = 'scraper_bot') {
+    this.userDataDir = path.resolve(process.cwd(), 'sessions', accountId);
+  }
+
+  async launch(): Promise<Page> {
+    if (!fs.existsSync(this.userDataDir)) {
+      fs.mkdirSync(this.userDataDir, { recursive: true });
+    }
+
+    this.context = await chromium.launchPersistentContext(this.userDataDir, {
+      headless: process.env.HEADLESS !== 'false', // Default to true
+      viewport: null,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--start-maximized',
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ]
+    });
+
+    this.page = this.context.pages()[0] || await this.context.newPage();
+
+    // Basic Stealth
+    await this.page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
+    return this.page;
+  }
+
+  async close() {
+    if (this.context) await this.context.close();
+  }
+}
+
+
+
+==========================================
+FILE: ./scraper/src/core/scraper.ts
+==========================================
+import { Page } from 'playwright';
+import { BrowserEngine } from './browser.js';
+import { db } from '../db.js';
+import { posts, snapshots } from '../schema.js';
+import { sql } from 'drizzle-orm';
+
+export class ScraperService {
+  private engine: BrowserEngine;
+
+  constructor(private targetAccount: string) {
+    this.engine = new BrowserEngine();
+  }
+
+  async scrape() {
+    console.log(`🕵️ Starting surveillance on @${this.targetAccount}`);
+    const page = await this.engine.launch();
+
+    try {
+      await page.goto(`https://x.com/${this.targetAccount}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
+
+      // Simple Login Check
+      if (page.url().includes('login')) {
+        console.warn('🔒 Login Wall Detected. If headless, this may fail.');
+      }
+
+      // Scroll & Scrape
+      for (let i = 0; i < 3; i++) {
+        await page.keyboard.press('j'); // Next tweet shortcut
+        await page.waitForTimeout(2000);
+        await this.processVisibleTweet(page);
+      }
+
+    } catch (e: any) {
+      console.error('❌ Scrape Error:', e.message);
+    } finally {
+      await this.engine.close();
+    }
+  }
+
+  private async processVisibleTweet(page: Page) {
+    try {
+      const data = await page.evaluate(() => {
+        const article = document.querySelector('article[data-testid="tweet"]');
+        if (!article) return null;
+
+        const getText = (s: string) => article.querySelector(s)?.textContent || '';
+        const getMetric = (label: string) => {
+           const el = article.querySelector(`[aria-label*="${label}"]`);
+           return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
+        };
+
+        const link = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
+        const id = link?.split('/status/')[1];
+
+        if (!id) return null;
+
+        return {
+          id,
+          content: getText('[data-testid="tweetText"]'),
+          likes: getMetric('likes'),
+          reposts: getMetric('reposts'),
+          replies: getMetric('replies'),
+          views: getText('a[href*="/analytics"]')
+        };
+      });
+
+      if (data) await this.saveData(data);
+
+    } catch (e) {}
+  }
+
+  private async saveData(raw: any) {
+    const parse = (str: string) => {
+      if (!str) return 0;
+      let n = parseFloat(str.replace(/,/g, ''));
+      if (str.toUpperCase().includes('K')) n *= 1000;
+      if (str.toUpperCase().includes('M')) n *= 1000000;
+      return Math.floor(n);
+    };
+
+    const clean = {
+      id: raw.id,
+      content: raw.content,
+      author: this.targetAccount,
+      views: parse(raw.views),
+      likes: parse(raw.likes),
+      reposts: parse(raw.reposts),
+      replies: parse(raw.replies),
+      updatedAt: new Date().toISOString() // Drizzle SQLite text date
+    };
+
+    // Upsert Post
+    await db.insert(posts).values(clean)
+      .onConflictDoUpdate({ target: posts.id, set: { ...clean, lastScraped: new Date().toISOString() } });
+
+    // Snapshot
+    await db.insert(snapshots).values({
+      postId: clean.id,
+      ...clean
+    });
+
+    console.log(`💾 Saved Post ${clean.id} | Likes: ${clean.likes}`);
+  }
+}
+
+
+
+==========================================
+FILE: ./scraper/src/db.ts
+==========================================
+import { createClient } from '@libsql/client';
+import { drizzle } from 'drizzle-orm/libsql';
+import * as schema from './schema.js'; // We will create a local copy of schema for type safety
+
+const client = createClient({
+  url: process.env.DATABASE_URL || 'file:../backend/bot.db',
+});
+
+export const db = drizzle(client, { schema });
+
+
+
+==========================================
+FILE: ./scraper/src/index.ts
+==========================================
+import { Worker } from 'bullmq';
+import { ScraperService } from './core/scraper.js';
+
+const REDIS_CONFIG = {
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || '6379')
+};
+
+console.log("👷 Scraper Worker Started. Waiting for jobs...");
+
+const worker = new Worker('scraper_queue', async (job) => {
+  console.log(`🚀 Processing Job: ${job.name} for @${job.data.target}`);
+  const scraper = new ScraperService(job.data.target);
+  await scraper.scrape();
+  console.log("✅ Job Complete");
+}, { connection: REDIS_CONFIG });
+
+worker.on('failed', (job, err) => {
+  console.error(`❌ Job ${job?.id} failed:`, err);
+});
+
+
+
+==========================================
+FILE: ./scraper/src/schema.ts
+==========================================
+import { sqliteTable, int, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// --- TELEGRAM USERS ---
+export const users = sqliteTable('users', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  telegramId: int('telegram_id').unique().notNull(),
+  username: text('username'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isActive: int('is_active', { mode: 'boolean' }).default(true),
+});
+
+// --- SCRAPED POSTS ---
+export const posts = sqliteTable('posts', {
+  id: text('id').primaryKey(), // The X Post ID
+  content: text('content'),
+  author: text('author').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastScraped: text('last_scraped'),
+  
+  // Metrics
+  views: int('views').default(0),
+  likes: int('likes').default(0),
+  reposts: int('reposts').default(0),
+  replies: int('replies').default(0),
+});
+
+// --- METRIC SNAPSHOTS (History) ---
+export const snapshots = sqliteTable('snapshots', {
+  id: int('id').primaryKey({ autoIncrement: true }),
+  postId: text('post_id').references(() => posts.id, { onDelete: 'cascade' }),
+  timestamp: text('timestamp').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  
+  views: int('views'),
+  likes: int('likes'),
+  reposts: int('reposts'),
+  replies: int('replies'),
+});
+
+
+
+==========================================
+FILE: ./scraper/tsconfig.json
+==========================================
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ESNext",
+    "sourceMap": true,
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"]
+}
+
+
+

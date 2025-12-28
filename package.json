@@ -1,0 +1,12 @@
+{
+  "name": "connor-bot-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "build": "pnpm -r build",
+    "db:push": "pnpm --filter backend db:push"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

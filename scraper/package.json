@@ -1,0 +1,27 @@
+{
+  "name": "scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.6.0",
+    "bullmq": "^5.8.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.30.10",
+    "ioredis": "^5.4.1",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0",
+    "playwright": "^1.44.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "user-agents": "^1.1.669"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}
