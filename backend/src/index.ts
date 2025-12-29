@@ -1,3 +1,5 @@
+import express, { Express } from 'express';
+import { Server } from 'http';
 import { healthRouter } from './health.js';
 import { bot } from './bot/bot.js';
 import { config } from './core/config.js';
@@ -7,6 +9,17 @@ import { UsersService } from './modules/users/users.service.js';
 
 class Application {
   private intervalId: NodeJS.Timeout | null = null;
+  public expressApp: Express;
+  private httpServer: Server | null = null;
+
+  constructor() {
+    this.expressApp = express();
+    this.expressApp.use(express.json());
+  }
+
+  use(path: string, handler: any) {
+    this.expressApp.use(path, handler);
+  }
 
   async start() {
     logger.info('🤖 Starting Connor Bot System...');
@@ -15,6 +28,11 @@ class Application {
     logger.info({ userCount: count }, '📦 Database initialized');
 
     this.startJobs();
+
+    // Start Express Server
+    this.httpServer = this.expressApp.listen(config.PORT, () => {
+      logger.info({ port: config.PORT }, '🌍 API Server started');
+    });
 
     await bot.start({
       onStart: () => logger.info('✅ Telegram Bot Connected'),
@@ -48,13 +66,14 @@ class Application {
 
   stop() {
     if (this.intervalId) clearInterval(this.intervalId);
+    if (this.httpServer) this.httpServer.close();
     bot.stop();
     logger.info('🛑 System Shutdown');
   }
 }
 
 const app = new Application();
-app.use('/health', healthRouter);
+app.use('/', healthRouter);
 app.start().catch(err => {
   logger.fatal({ err }, 'Startup Failed');
   process.exit(1);

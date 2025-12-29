@@ -28,7 +28,7 @@ services:
         condition: service_healthy
     environment:
       - DATABASE_URL=file:/app/data/bot.db
-      - REDIS_HOST=redis
+      - REDIS_HOST=localhost
       - REDIS_PORT=6379
       - HEADLESS=true
       # - PROXY_URL=http://user:pass@host:port

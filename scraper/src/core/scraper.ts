@@ -49,7 +49,7 @@ export class ScraperService {
         const getText = (s: string) => article.querySelector(s)?.textContent || '';
         const getMetric = (label: string) => {
            // X uses various labels, we map to reposts internally
-           const el = article.querySelector(`[aria-label*="${label}"]`);
+           const el = article.querySelector(`[aria-label*="${label}" i]`);
            return el?.getAttribute('aria-label')?.split(' ')[0] || "0";
         };
 
